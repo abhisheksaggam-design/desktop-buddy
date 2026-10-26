@@ -1,0 +1,8 @@
+.build/
+dist/
+*.dmg
+*.zip
+.DS_Store
+.swiftpm/
+# Team sign-in setup: share privately, never commit
+team.json
