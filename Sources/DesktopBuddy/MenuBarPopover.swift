@@ -9,6 +9,7 @@ struct MenuBarPopover: View {
     var body: some View {
         VStack(spacing: 0) {
             header
+            UpdateBanner()
             Divider()
             if !state.config.accounts.isEmpty {
                 accountsStrip

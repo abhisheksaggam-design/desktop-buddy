@@ -685,7 +685,7 @@ private struct GeneralPane: View {
                 if let loginError { Text(loginError).font(.caption).foregroundStyle(.red) }
                 Toggle("Pause All Notifications", isOn: $state.config.paused)
             } footer: {
-                Footnote("While paused, Desktop Buddy stops checking every account and hides the characters.")
+                Footnote("While paused, Desktop Buddy stops checking every account and hides the logos on your screen.")
             }
 
             Section("Checking") {
@@ -726,6 +726,8 @@ private struct GeneralPane: View {
                 Footnote("During quiet hours nothing pops up. Anything that arrives waits until quiet hours end.")
             }
 
+            UpdatesSection()
+
             Section {
                 LabeledContent("Your data") {
                     Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([Paths.supportDir]) }
@@ -733,7 +735,7 @@ private struct GeneralPane: View {
             } header: {
                 Text("Privacy")
             } footer: {
-                Footnote("Everything stays on this Mac. Sign-ins are stored in your Keychain, and Desktop Buddy talks only to Google and Microsoft. There are no servers of ours and no AI involved.")
+                Footnote("Everything stays on this Mac. Sign-ins are stored in your Keychain, and Desktop Buddy talks only to Google and Microsoft (plus GitHub, to check for updates). There are no servers of ours and no AI involved.")
             }
         }
         .formStyle(.grouped)

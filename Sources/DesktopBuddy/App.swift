@@ -52,6 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         _ = OverlayController.shared
         OverlayController.shared.update()
         Poller.shared.start()
+        UpdateChecker.shared.start()
 
         if CommandLine.arguments.contains("--demo") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { Self.sendTestItems() }
@@ -82,6 +83,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             menu.addItem(withTitle: AppState.shared.config.paused ? "Resume Notifications" : "Pause Notifications",
                          action: #selector(togglePause), keyEquivalent: "").target = self
             menu.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: ",").target = self
+            menu.addItem(withTitle: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "").target = self
             menu.addItem(.separator())
             menu.addItem(withTitle: "Quit Desktop Buddy", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
             statusItem.menu = menu
@@ -98,6 +100,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     @objc private func togglePause() { AppState.shared.config.paused.toggle() }
+
+    /// Checks now and says what it found: a new version (Download / Later), up to date, or offline.
+    @objc func checkForUpdates() {
+        Task { @MainActor in
+            let updates = UpdateChecker.shared
+            await updates.check()
+            let alert = NSAlert()
+            if let r = updates.available {
+                alert.messageText = "Desktop Buddy \(r.version) Is Available"
+                alert.informativeText = "You have \(updates.currentVersion). Download it, open it and drag Desktop Buddy into Applications. Your accounts and settings stay as they are."
+                alert.addButton(withTitle: "Download")
+                alert.addButton(withTitle: "Later")
+            } else if let e = updates.lastError {
+                alert.messageText = "Couldn't Check for Updates"
+                alert.informativeText = e
+                alert.addButton(withTitle: "OK")
+            } else {
+                alert.messageText = "You're Up to Date"
+                alert.informativeText = "Desktop Buddy \(updates.currentVersion) is the latest version."
+                alert.addButton(withTitle: "OK")
+            }
+            NSApp.activate(ignoringOtherApps: true)
+            if alert.runModal() == .alertFirstButtonReturn, updates.available != nil { updates.download() }
+        }
+    }
 
     @objc func openSettings() {
         if settingsWindow == nil {
@@ -153,6 +180,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let appItem = NSMenuItem(); main.addItem(appItem)
         let app = NSMenu()
         app.addItem(withTitle: "About Desktop Buddy", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        app.addItem(withTitle: "Check for Updates…", action: #selector(AppDelegate.checkForUpdates), keyEquivalent: "").target = target
         app.addItem(.separator())
         app.addItem(withTitle: "Settings…", action: #selector(AppDelegate.openSettings), keyEquivalent: ",").target = target
         app.addItem(.separator())

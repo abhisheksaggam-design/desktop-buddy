@@ -29,6 +29,7 @@ enum SelfTest {
         accountNaming()
         await signInLoopback()
         await signInAppScheme()
+        updateVersions()
 
         print("\n\(passed) passed, \(failed.count) failed")
         failed.forEach { print("  ✗ \($0)") }
@@ -69,6 +70,20 @@ enum SelfTest {
         var earlyCancelled = false
         do { _ = try await early.waitForCallback(timeout: 5) } catch AuthError.cancelled { earlyCancelled = true } catch {}
         check("Cancel before waiting also ends it", earlyCancelled)
+    }
+
+    // MARK: - Update check
+
+    private static func updateVersions() {
+        begin("Update check")
+        check("tag v2.1 → 2.1", UpdateChecker.version(fromTag: "v2.1") == "2.1")
+        check("tag without v kept", UpdateChecker.version(fromTag: "2.1.3") == "2.1.3")
+        check("2.1 is newer than 2.0", UpdateChecker.isNewer("2.1", than: "2.0"))
+        check("2.10 is newer than 2.9", UpdateChecker.isNewer("2.10", than: "2.9"))
+        check("3.0 is newer than 2.9.9", UpdateChecker.isNewer("3.0", than: "2.9.9"))
+        check("same version is not newer", !UpdateChecker.isNewer("2.1", than: "2.1.0"))
+        check("older is not newer", !UpdateChecker.isNewer("2.0", than: "2.1"))
+        check("automatic checks are on by default", AppConfig().checkForUpdates)
     }
 
     // MARK: - Sign-in-first naming

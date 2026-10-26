@@ -244,8 +244,10 @@ If a rule can't work (for example Chat is off for that account), the client page
 | **Tokens** | macOS Keychain only |
 | **Cached data** | `~/Library/Application Support/DesktopBuddy/`: settings and the notifications currently on screen (sender, subject, short preview) |
 | **Log** | `status.log` in the same folder: counts and errors only, never message content. Capped at 1 MB. |
-| **Network** | Only Google and Microsoft APIs over HTTPS. No analytics, no AI, no other servers. |
+| **Network** | Google and Microsoft APIs over HTTPS, plus one daily check of this repository's latest release on GitHub (no account data sent; can be turned off). No analytics, no AI, no other servers. |
 | **Dependencies** | None. Apple frameworks only. |
+
+**Updates:** once a day the app checks this repository for a newer release. If there is one, the menu bar popover shows **"Desktop Buddy x.y is available"** with a **Download** button. Open the DMG and drag Desktop Buddy into Applications, choosing **Replace**. Your accounts and settings stay. You can also click **Check for Updates…** (right-click the menu bar icon), or turn automatic checks off in **Settings → General → Updates**.
 
 **To uninstall:**
 1. Quit the app and delete it from Applications.
@@ -315,6 +317,15 @@ xcrun stapler staple "dist/Desktop Buddy.dmg"
 | `…/AppState.swift`, `Models.swift`, `Persistence.swift` | State, data model, local storage |
 | `…/Clients.swift`, `ClientHealth.swift`, `ClientSettings.swift` | Client rules, health checks, client pages |
 | `…/SettingsWindow.swift`, `Overlay.swift`, `MenuBarPopover.swift` | Interface |
+| `…/Updates.swift` | Daily check for a newer GitHub release |
 | `…/SelfTest.swift` | Built-in scenario tests (`--selftest`) |
 | `Resources/` | App icon and bundled logos |
 | `docs/` | Screenshots |
+
+### Publishing a new version
+
+1. Raise `CFBundleShortVersionString` in `build-app.sh` (for example `2.1` → `2.2`) and `CFBundleVersion` by one.
+2. Build the DMG with `team.json` in the folder: `./build-app.sh --share`.
+3. Create a GitHub release tagged `v2.2` and attach the DMG named **`Desktop-Buddy.dmg`**.
+
+Within a day, everyone's app shows the update. The tag must be higher than the version people have, and releases marked as pre-release are ignored.

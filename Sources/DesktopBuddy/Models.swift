@@ -202,4 +202,9 @@ struct AppConfig: Codable, Equatable {
     var quietEndHour: Int?          // e.g. 8
     var playSound = true
     var paused = false
+    var autoUpdateCheck: Bool?                      // nil = on
+    var checkForUpdates: Bool {
+        get { autoUpdateCheck ?? true }
+        set { autoUpdateCheck = newValue }
+    }
 }
