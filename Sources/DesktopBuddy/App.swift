@@ -80,6 +80,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
                 print("Update result: \(UpdateChecker.shared.phase)")
             }
         }
+        // Test hook (only with a throwaway data folder): another process can post
+        // "DesktopBuddy.test.send" to deliver sample notifications, to watch the animation.
+        if ProcessInfo.processInfo.environment["DESKTOPBUDDY_HOME"] != nil {
+            DistributedNotificationCenter.default().addObserver(forName: Notification.Name("DesktopBuddy.test.status"),
+                                                                object: nil, queue: .main) { _ in
+                MainActor.assumeIsolated { OverlayController.shared.printStatus() }
+            }
+            DistributedNotificationCenter.default().addObserver(forName: Notification.Name("DesktopBuddy.test.send"),
+                                                                object: nil, queue: .main) { note in
+                let owner = note.object as? String
+                MainActor.assumeIsolated {
+                    AppState.shared.offer([BuddyItem(id: "test:\(UUID().uuidString)", source: .chat, accountID: "x",
+                                                     title: "Test message", from: "Tester", detail: "Checking the animation",
+                                                     date: Date(), url: nil, clientID: owner)])
+                }
+            }
+        }
         if CommandLine.arguments.contains("--demo") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { Self.sendTestItems() }
             return

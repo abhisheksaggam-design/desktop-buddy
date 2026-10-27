@@ -320,6 +320,21 @@ enum SelfTest {
         let p = NSPoint(x: 1300, y: 200)
         check("offset round-trips", OverlayPlacement.frame(size: size, offset: OverlayPlacement.offset(of: p, in: main), in: main).maxX == 1300)
 
+        let order = ["gatehouse", "riskhawk", "dynamatix", "reminders"]
+        check("first logos follow the usual order",
+              AppState.slots(previous: [], present: ["riskhawk", "gatehouse"], defaultOrder: order) == ["gatehouse", "riskhawk"])
+        check("a new logo joins on the left, the others keep their place",
+              AppState.slots(previous: ["gatehouse", "riskhawk"], present: ["gatehouse", "riskhawk", "reminders"], defaultOrder: order)
+                == ["reminders", "gatehouse", "riskhawk"])
+        check("a logo leaving doesn't reorder the rest",
+              AppState.slots(previous: ["reminders", "gatehouse", "riskhawk"], present: ["reminders", "riskhawk"], defaultOrder: order)
+                == ["reminders", "riskhawk"])
+        let canvas = OverlayPlacement.canvasFrame(content: NSSize(width: 200, height: 110), offset: OverlayPlacement.defaultOffset, in: main)
+        check("canvas keeps the logos in the bottom-right corner", canvas.maxX == 1416 && canvas.minY == 104)
+        let bigger = OverlayPlacement.canvasFrame(content: NSSize(width: 320, height: 260), offset: OverlayPlacement.defaultOffset, in: main)
+        check("a bubble appearing doesn't move or resize the canvas", bigger == canvas)
+        let wide = OverlayPlacement.canvasFrame(content: NSSize(width: 700, height: 110), offset: OverlayPlacement.defaultOffset, in: main)
+        check("canvas grows only when the logos outgrow it", wide.width == 700 && wide.maxX == canvas.maxX)
         let now = Date()
         check("hidden from sharing by default", AppConfig().hidesFromSharing
               && OverlayPlacement.sharingHidden(protection: true, allowedUntil: nil, now: now))

@@ -47,7 +47,19 @@ final class OverlayController {
         panel.isReleasedWhenClosed = false
         panel.contentView = host
         host.rootView = OverlayView(onDrag: { [weak self] delta in self?.drag(by: delta) },
-                                    onDragEnd: { [weak self] in self?.saveAnchor() })
+                                    onDragEnd: { [weak self] in self?.saveAnchor() },
+                                    onSize: { [weak self] size in
+                                        guard let self, self.contentSize != size else { return }
+                                        self.contentSize = size
+                                        self.update()
+                                    })
+
+        // Clicks pass through the empty part of the canvas: the panel only takes the mouse
+        // while the pointer is over the logos, bubble or list.
+        let track: (NSEvent) -> Void = { [weak self] _ in self?.updateMousePassThrough() }
+        NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged], handler: track)
+        NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged]) { track($0); return $0 }
+        panel.acceptsMouseMovedEvents = true
 
         Publishers.CombineLatest4(state.$items, state.$expanded, state.$lastArrival, state.$config)
             .receive(on: RunLoop.main)
@@ -62,15 +74,40 @@ final class OverlayController {
             .store(in: &bag)
     }
 
+    /// The panel is a fixed canvas with the logos pinned to its bottom-right corner, so it never
+    /// resizes while something animates (resizing a window makes its content jump for a frame).
+    /// It only grows if the content outgrows it, e.g. many logos or the open list.
     func update() {
         panel.sharingType = OverlayPlacement.sharingHidden(protection: state.config.hidesFromSharing,
                                                            allowedUntil: state.screenshotsAllowedUntil) ? .none : .readOnly
         guard !state.items.isEmpty && !state.config.paused else { panel.orderOut(nil); return }
-        host.layoutSubtreeIfNeeded()
-        let size = host.fittingSize
         let vf = OverlayPlacement.mainDisplay ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-        panel.setFrame(OverlayPlacement.frame(size: size, offset: offset, in: vf), display: true)
+        let canvas = OverlayPlacement.canvasFrame(content: contentSize, offset: offset, in: vf)
+        if panel.frame != canvas { panel.setFrame(canvas, display: true) }
         if !panel.isVisible { panel.orderFrontRegardless() }
+        updateMousePassThrough()
+    }
+
+    /// The logos' real size, reported by the view itself.
+    private var contentSize: CGSize = .zero
+
+    /// Where the logos (and bubble/list) actually are on screen.
+    private var contentRect: NSRect {
+        let f = panel.frame
+        return NSRect(x: f.maxX - contentSize.width, y: f.minY, width: contentSize.width, height: contentSize.height)
+    }
+
+    /// Test hook output: where things are and whether clicks pass through right now.
+    func printStatus() {
+        updateMousePassThrough()
+        print("canvas \(panel.frame) content \(contentRect) mouse \(NSEvent.mouseLocation) passThrough \(panel.ignoresMouseEvents)")
+        fflush(stdout)
+    }
+
+    private func updateMousePassThrough() {
+        guard panel.isVisible else { return }
+        let inside = contentRect.insetBy(dx: -2, dy: -2).contains(NSEvent.mouseLocation)
+        if panel.ignoresMouseEvents == inside { panel.ignoresMouseEvents = !inside }
     }
 
     /// macOS uses one switch for screen sharing and screenshots, so open it briefly for a screenshot.
@@ -102,16 +139,25 @@ final class OverlayController {
     /// screen slides back to the nearest edge of the main one).
     private func saveAnchor() {
         guard let vf = OverlayPlacement.mainDisplay else { return }
-        let size = panel.frame.size
         let rough = OverlayPlacement.offset(of: NSPoint(x: panel.frame.maxX, y: panel.frame.minY), in: vf)
-        let target = OverlayPlacement.frame(size: size, offset: rough, in: vf)
-        offset = OverlayPlacement.offset(of: NSPoint(x: target.maxX, y: target.minY), in: vf)
+        let content = OverlayPlacement.frame(size: contentSize, offset: rough, in: vf)
+        offset = OverlayPlacement.offset(of: NSPoint(x: content.maxX, y: content.minY), in: vf)
+        let target = OverlayPlacement.canvasFrame(content: contentSize, offset: offset, in: vf)
         if target.origin != panel.frame.origin {
             NSAnimationContext.runAnimationGroup { ctx in
                 ctx.duration = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.25
                 panel.animator().setFrame(target, display: true)
             }
         }
+    }
+}
+
+private struct OverlaySizeKey: PreferenceKey {
+    static var defaultValue: CGSize = .zero
+    // Views without a size report pass .zero; keep the real one.
+    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
+        let next = nextValue()
+        value = CGSize(width: max(value.width, next.width), height: max(value.height, next.height))
     }
 }
 
@@ -134,6 +180,17 @@ enum OverlayPlacement {
         return NSRect(x: maxX - size.width, y: minY, width: size.width, height: size.height)
     }
 
+    /// Room for the logos, a bubble or the open list without ever resizing mid-animation.
+    static let canvasSize = NSSize(width: 560, height: 820)
+
+    /// The panel's frame: the content clamped onto the display, with the canvas extending up and
+    /// to the left of it (and growing only if the content is bigger than the canvas).
+    static func canvasFrame(content: NSSize, offset: CGSize, in vf: NSRect) -> NSRect {
+        let c = frame(size: NSSize(width: max(content.width, 1), height: max(content.height, 1)), offset: offset, in: vf)
+        let w = max(canvasSize.width, content.width), h = max(canvasSize.height, content.height)
+        return NSRect(x: c.maxX - w, y: c.minY, width: w, height: h)
+    }
+
     /// Kept out of screen sharing (and, by macOS, screenshots) unless turned off or briefly allowed.
     static func sharingHidden(protection: Bool, allowedUntil: Date?, now: Date = Date()) -> Bool {
         protection && !(allowedUntil.map { $0 > now } ?? false)
@@ -144,6 +201,7 @@ struct OverlayView: View {
     @ObservedObject var state = AppState.shared
     var onDrag: (CGSize) -> Void = { _ in }
     var onDragEnd: () -> Void = {}
+    var onSize: (CGSize) -> Void = { _ in }
 
     @Local private var bubble: BuddyItem? = nil
     @Local private var excitedOwner: String? = nil
@@ -165,11 +223,19 @@ struct OverlayView: View {
             HStack(alignment: .top, spacing: 6) {
                 ForEach(state.activeOwners, id: \.self) { owner in
                     buddy(for: owner)
+                        .transition(.scale(scale: 0.6).combined(with: .opacity))
                 }
             }
+            // A new logo grows in and the others slide over, instead of jumping.
+            .animation(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : buddySpring, value: state.activeOwners)
         }
         .padding(12)
         .fixedSize()
+        .background(GeometryReader { g in Color.clear.preference(key: OverlaySizeKey.self, value: g.size) })
+        .onPreferenceChange(OverlaySizeKey.self) { onSize($0) }
+        // Pinned to the bottom-right: when the window is briefly bigger than the content, the
+        // spare room is above and to the left, so the logos stay exactly where they are.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
         .onChange(of: state.lastArrival) { _, item in
             guard let item else { withAnimation { bubble = nil }; return }
             withAnimation(buddySpring) { bubble = item }

@@ -20,7 +20,14 @@ final class AppState: ObservableObject {
     static let shared = AppState()
 
     @Published var config: AppConfig { didSet { JSONFile.save(config, to: Paths.config) } }
-    @Published private(set) var items: [BuddyItem] = [] { didSet { JSONFile.save(items, to: Paths.inbox) } }
+    @Published private(set) var items: [BuddyItem] = [] {
+        didSet {
+            JSONFile.save(items, to: Paths.inbox)
+            ownerSlots = Self.slots(previous: ownerSlots, present: Set(items.map(\.owner)), defaultOrder: defaultOwnerOrder)
+        }
+    }
+    /// Left-to-right order of the logos on screen (see `slots`).
+    private var ownerSlots: [String] = []
     @Published var expanded = false
     @Published var filterOwner: String?             // nil = show every owner in the list
     @Published var lastArrival: BuddyItem?          // drives the speech bubble
@@ -257,9 +264,18 @@ final class AppState: ObservableObject {
 
     /// Owners that currently have something to show, in a stable left-to-right order.
     var activeOwners: [String] {
-        let order = config.clients.map(\.id) + config.accounts.map(\.id) + [reminderOwner]
         let present = Set(items.map(\.owner))
-        return order.filter(present.contains)
+        return Self.slots(previous: ownerSlots, present: present, defaultOrder: defaultOwnerOrder)
+    }
+
+    private var defaultOwnerOrder: [String] { config.clients.map(\.id) + config.accounts.map(\.id) + [reminderOwner] }
+
+    /// Logos keep their place: the logos sit in the bottom-right corner, so a newcomer joins on the
+    /// left (where there's room) instead of pushing the others aside. Owners that leave just drop out.
+    nonisolated static func slots(previous: [String], present: Set<String>, defaultOrder: [String]) -> [String] {
+        let kept = previous.filter(present.contains)
+        let newcomers = defaultOrder.filter { present.contains($0) && !kept.contains($0) }
+        return newcomers + kept
     }
 
     func ownerName(_ owner: String) -> String {
