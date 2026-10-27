@@ -72,6 +72,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
         Poller.shared.start()
         UpdateChecker.shared.start()
 
+        // Test hook: check the feed (DESKTOPBUDDY_UPDATE_FEED) and install straight away.
+        if CommandLine.arguments.contains("--install-update") {
+            Task { @MainActor in
+                await UpdateChecker.shared.check()
+                await UpdateChecker.shared.installAndRestart()
+                print("Update result: \(UpdateChecker.shared.phase)")
+            }
+        }
         if CommandLine.arguments.contains("--demo") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { Self.sendTestItems() }
             return
@@ -147,8 +155,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
             let alert = NSAlert()
             if let r = updates.available {
                 alert.messageText = "Desktop Buddy \(r.version) Is Available"
-                alert.informativeText = "You have \(updates.currentVersion). Download it, open it and drag Desktop Buddy into Applications. Your accounts and settings stay as they are."
-                alert.addButton(withTitle: "Download")
+                alert.informativeText = updates.canInstallInPlace
+                    ? "You have \(updates.currentVersion). Desktop Buddy downloads it, checks it and restarts. Your accounts and settings stay as they are."
+                    : "You have \(updates.currentVersion). Download it, open it and drag Desktop Buddy into Applications. Your accounts and settings stay as they are."
+                alert.addButton(withTitle: updates.canInstallInPlace ? "Update and Restart" : "Download")
                 alert.addButton(withTitle: "Later")
             } else if let e = updates.lastError {
                 alert.messageText = "Couldn't Check for Updates"
@@ -160,7 +170,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
                 alert.addButton(withTitle: "OK")
             }
             NSApp.activate(ignoringOtherApps: true)
-            if alert.runModal() == .alertFirstButtonReturn, updates.available != nil { updates.download() }
+            guard alert.runModal() == .alertFirstButtonReturn, updates.available != nil else { return }
+            if updates.canInstallInPlace {
+                await updates.installAndRestart()
+                if case .failed(let message) = updates.phase {
+                    let fail = NSAlert()
+                    fail.messageText = "Couldn't Update"
+                    fail.informativeText = message
+                    fail.addButton(withTitle: "Download Manually")
+                    fail.addButton(withTitle: "Cancel")
+                    if fail.runModal() == .alertFirstButtonReturn { updates.download() }
+                }
+            } else {
+                updates.download()
+            }
         }
     }
 

@@ -90,6 +90,15 @@ enum SelfTest {
         check("same version is not newer", !UpdateChecker.isNewer("2.1", than: "2.1.0"))
         check("older is not newer", !UpdateChecker.isNewer("2.0", than: "2.1"))
         check("automatic checks are on by default", AppConfig().checkForUpdates)
+        let hex = String(repeating: "ab", count: 32)
+        check("checksum file is read", UpdateChecker.expectedChecksum("\(hex)  Desktop-Buddy.dmg\n") == hex)
+        check("checksum is case-insensitive", UpdateChecker.expectedChecksum(hex.uppercased()) == hex)
+        check("a broken checksum file is refused", UpdateChecker.expectedChecksum("not a checksum") == nil
+              && UpdateChecker.expectedChecksum("abc123") == nil)
+        let f = FileManager.default.temporaryDirectory.appendingPathComponent("sumtest-\(UUID().uuidString)")
+        try? Data("hello".utf8).write(to: f)
+        check("SHA-256 of a file", (try? UpdateChecker.sha256(of: f)) == "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824")
+        try? FileManager.default.removeItem(at: f)
     }
 
     // MARK: - Sign-in-first naming

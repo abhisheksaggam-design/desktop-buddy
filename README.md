@@ -247,7 +247,7 @@ If a rule can't work (for example Chat is off for that account), the client page
 | **Network** | Google and Microsoft APIs over HTTPS, plus one daily check of this repository's latest release on GitHub (no account data sent; can be turned off). No analytics, no AI, no other servers. |
 | **Dependencies** | None. Apple frameworks only. |
 
-**Updates:** once a day the app checks this repository for a newer release. If there is one, the menu bar popover shows **"Desktop Buddy x.y is available"** with a **Download** button. Open the DMG and drag Desktop Buddy into Applications, choosing **Replace**. Your accounts and settings stay. You can also click **Check for Updates…** (right-click the menu bar icon), or turn automatic checks off in **Settings → General → Updates**.
+**Updates:** once a day the app checks this repository for a newer release. If there is one, the menu bar dropdown shows **"Desktop Buddy x.y is available"** with **Update and Restart**. Desktop Buddy downloads it, checks it (checksum, and signed with the same certificate as the copy you have), swaps itself in Applications and reopens. Your accounts and settings stay. You can also choose **Check for Updates…** (right-click the menu bar icon), or turn automatic checks off in **Settings → General → Updates**. Versions before 2.3 update by hand once: download the DMG and drag Desktop Buddy into Applications, choosing **Replace**.
 
 **To uninstall:**
 1. Quit the app and delete it from Applications.
@@ -267,7 +267,7 @@ If a rule can't work (for example Chat is off for that account), the client page
 | "Gmail API has not been used in project…" | Enable that API (step 2.2). The account page shows a **Fix…** link. |
 | Chat shows nothing | Do step 2.3 (Chat app configuration) |
 | "Sign-in Expired" | Click **Sign In Again** on the account |
-| Keychain asks again after an update | Click **Always Allow**. Builds that aren't signed with a Developer ID ask once per new version. |
+| Keychain asks again after an update | Click **Always Allow**. From 2.3 on, every version is signed with the same certificate, so this happens once when moving to 2.3 and not after. |
 
 ---
 
@@ -324,8 +324,8 @@ xcrun stapler staple "dist/Desktop Buddy.dmg"
 
 ### Publishing a new version
 
-1. Raise `CFBundleShortVersionString` in `build-app.sh` (for example `2.1` → `2.2`) and `CFBundleVersion` by one.
-2. Build the DMG with `team.json` in the folder: `./build-app.sh --share`.
-3. Create a GitHub release tagged `v2.2` and attach the DMG named **`Desktop-Buddy.dmg`**.
+1. Raise `CFBundleShortVersionString` in `build-app.sh` (for example `2.3` → `2.4`) and `CFBundleVersion` by one.
+2. Build the DMG with `team.json` in the folder: `./build-app.sh --share`. It must print **"Signed with Desktop Buddy Signing"** ([docs/signing.md](docs/signing.md)).
+3. Create a GitHub release tagged `v2.4` and attach **`Desktop-Buddy.dmg`** and **`Desktop-Buddy.dmg.sha256`** from `dist/`. Without the checksum file, the app falls back to a plain Download button.
 
 Within a day, everyone's app shows the update. The tag must be higher than the version people have, and releases marked as pre-release are ignored.

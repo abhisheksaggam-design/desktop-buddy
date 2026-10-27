@@ -48,8 +48,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleExecutable</key><string>DesktopBuddyV2</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
-  <key>CFBundleShortVersionString</key><string>2.2</string>
-  <key>CFBundleVersion</key><string>6</string>
+  <key>CFBundleShortVersionString</key><string>2.3</string>
+  <key>CFBundleVersion</key><string>7</string>
   <key>NSHumanReadableCopyright</key><string>Desktop Buddy. Reads Google Workspace and Microsoft 365 on your Mac; no servers, no AI.</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><true/>
@@ -58,10 +58,24 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </dict></plist>
 PLIST
 
-if [[ -n "${SIGN_ID:-}" ]]; then
+# Signing, best first:
+#   SIGN_ID="Developer ID Application: …"  Apple-issued: no Gatekeeper warning once notarised.
+#   "Desktop Buddy Signing" in your keychain  the team's own certificate (see docs/signing.md): every version
+#                                             has the same identity, so the Keychain never asks again after
+#                                             an update and the in-app updater only accepts our builds.
+#   otherwise ad-hoc (local testing only).
+if [[ -z "${SIGN_ID:-}" ]] && security find-identity -p codesigning 2>/dev/null | grep -q '"Desktop Buddy Signing"'; then
+  SIGN_ID=$(security find-identity -p codesigning | awk '/"Desktop Buddy Signing"/ {print $2; exit}')
+  SIGN_TEAM=1
+fi
+if [[ -n "${SIGN_ID:-}" && -z "${SIGN_TEAM:-}" ]]; then
   codesign --force --deep --options runtime --timestamp --sign "$SIGN_ID" "$APP"
+elif [[ -n "${SIGN_ID:-}" ]]; then
+  codesign --force --deep --options runtime --timestamp=none --sign "$SIGN_ID" "$APP"
+  echo "Signed with Desktop Buddy Signing"
 else
   codesign --force --deep --sign - "$APP"
+  echo "Warning: ad-hoc signed. Builds for users must be signed with Desktop Buddy Signing (docs/signing.md)."
 fi
 echo "Built: $PWD/$APP"
 
@@ -83,5 +97,8 @@ if [[ "${1:-}" == "--share" ]]; then
   ln -s /Applications "$STAGE/Applications"
   hdiutil create -volname "Desktop Buddy" -srcfolder "$STAGE" -ov -format UDZO "dist/Desktop Buddy.dmg" >/dev/null
   rm -rf "$STAGE"
-  echo "Share: $PWD/dist/Desktop Buddy.dmg (and .zip)"
+  # Release assets: the in-app updater looks for these two names.
+  cp "dist/Desktop Buddy.dmg" dist/Desktop-Buddy.dmg
+  (cd dist && shasum -a 256 Desktop-Buddy.dmg > Desktop-Buddy.dmg.sha256)
+  echo "Share: $PWD/dist/Desktop-Buddy.dmg and Desktop-Buddy.dmg.sha256 (attach both to the GitHub release)"
 fi
