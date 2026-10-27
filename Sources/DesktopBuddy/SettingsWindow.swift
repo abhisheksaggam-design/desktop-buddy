@@ -16,6 +16,16 @@ final class SettingsRouter: ObservableObject {
     @Published var addingProvider: Provider?
     @Published var showingProviderPicker = false
     @Published var addingClient = false
+    /// Admin settings (Team Setup, per-account client IDs) were asked for: Option held while opening Settings.
+    @Published var adminRequested = false
+
+    /// Everyday users never see client IDs. Admins hold Option while opening Settings; a copy with
+    /// no sign-in set up shows them anyway, since that's the only way to fix it.
+    var showsAdmin: Bool { Self.showsAdmin(requested: adminRequested, team: TeamConfig.current) }
+
+    nonisolated static func showsAdmin(requested: Bool, team: TeamConfig) -> Bool {
+        requested || !(team.hasClient(for: .google) || team.hasClient(for: .microsoft))
+    }
 }
 
 struct SettingsRoot: View {
@@ -51,7 +61,9 @@ struct SettingsRoot: View {
                     sidebarItem("General", "gearshape.fill", .gray, .general)
                     sidebarItem("Appearance", "paintpalette.fill", .indigo, .appearance)
                     sidebarItem("Reminders", "bell.badge.fill", .teal, .reminders)
-                    sidebarItem("Team Setup", "person.3.fill", .blue, .team)
+                    if router.showsAdmin {
+                        sidebarItem("Team Setup", "person.3.fill", .blue, .team)
+                    }
                 }
             }
             .listStyle(.sidebar)
@@ -66,7 +78,7 @@ struct SettingsRoot: View {
                 case .client(let id) where state.client(id) != nil: ClientDetailView(clientID: id)
                 case .appearance: AppearancePane()
                 case .reminders: RemindersPane()
-                case .team: TeamSetupPane()
+                case .team where router.showsAdmin: TeamSetupPane()
                 default:
                     if state.config.accounts.isEmpty && router.selection == nil { NoAccountsView() } else { GeneralPane() }
                 }
@@ -230,6 +242,7 @@ private struct NoAccountsView: View {
 struct AccountDetailView: View {
     let accountID: String
     @ObservedObject var state = AppState.shared
+    @ObservedObject var router = SettingsRouter.shared
     @Local private var confirmRemove = false
     @Local private var showAdvanced = false
     @Local private var secretDraft = ""
@@ -283,6 +296,10 @@ struct AccountDetailView: View {
                 Footnote("Turning a service off stops checking it straight away and clears its notifications. Desktop Buddy only reads; it never sends, changes or deletes anything.")
             }
 
+            if a.watchMail {
+                MailFilterSections(account: binding)
+            }
+
             // Appearance
             Section("Appearance") {
                 TextField("Name", text: binding.label)
@@ -301,7 +318,8 @@ struct AccountDetailView: View {
                 }
             }
 
-            // Advanced
+            // Advanced (admins only)
+            if router.showsAdmin {
             Section {
                 DisclosureGroup("Advanced", isExpanded: $showAdvanced) {
                     TextField("Email", text: binding.email)
@@ -324,6 +342,8 @@ struct AccountDetailView: View {
                         }
                     }
                 }
+            }
+
             }
 
             Section {
@@ -702,6 +722,9 @@ private struct GeneralPane: View {
 
             Section {
                 Toggle("Play Sound", isOn: $state.config.playSound)
+                ForEach(ItemSource.allCases, id: \.self) {
+                    SoundRow(source: $0)
+                }
                 Toggle("Quiet Hours", isOn: Binding(
                     get: { state.config.quietStartHour != nil },
                     set: { on in
@@ -727,6 +750,14 @@ private struct GeneralPane: View {
             }
 
             UpdatesSection()
+
+            Section {
+                LabeledContent("Tour") {
+                    Button("Show Tour Again") { (NSApp.delegate as? AppDelegate)?.showTour() }
+                }
+            } footer: {
+                Footnote("A quick walk through the menu bar, the logos on your screen, and the settings that cut the noise.")
+            }
 
             Section {
                 LabeledContent("Your data") {
@@ -787,6 +818,23 @@ private struct AppearancePane: View {
                 LabeledContent("Preview") {
                     Button("Show Sample Notifications") { AppDelegate.sendTestItems() }
                 }
+            }
+
+            Section {
+                Toggle("Hide from Screen Sharing", isOn: $state.config.hidesFromSharing)
+                if state.config.hidesFromSharing {
+                    LabeledContent("Screenshots") {
+                        if let until = state.screenshotsAllowedUntil, until > Date() {
+                            Label("Allowed for a minute", systemImage: "camera").foregroundStyle(.secondary)
+                        } else {
+                            Button("Allow for 1 Minute") { OverlayController.shared.allowScreenshots() }
+                        }
+                    }
+                }
+            } header: {
+                Text("Privacy on Screen")
+            } footer: {
+                Footnote("The logos always stay on your main display (the one with the menu bar) and always show on your screen, calls included. While “Hide from Screen Sharing” is on, people you share your screen with don't see them. macOS uses the same switch for screenshots, so to take one, allow screenshots for a minute (also in the menu bar •••).")
             }
         }
         .formStyle(.grouped)

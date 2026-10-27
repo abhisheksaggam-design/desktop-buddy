@@ -159,14 +159,8 @@ enum ClientMatcher {
     static func matches(_ c: ClientConfig, _ item: BuddyItem) -> Bool {
         switch item.source {
         case .mail:
-            let addr = (item.fromAddress ?? "").lowercased()
-            if c.senders.contains(where: { rule in
-                let r = rule.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: " @"))
-                guard !r.isEmpty else { return false }
-                return r.contains("@") ? addr == r : (addr.hasSuffix("@" + r) || addr.hasSuffix("." + r))
-            }) { return true }
-            let text = item.title + " " + (item.detail ?? "") + " " + (item.from ?? "")
-            return c.keywords.contains { containsWord($0, in: text) }
+            if c.senders.contains(where: { senderMatches($0, item) }) { return true }
+            return c.keywords.contains { containsWord($0, in: mailText(item)) }
         case .chat:
             if let ref = item.chatRef, c.chats.contains(where: { $0.chatID == ref && $0.accountID == item.accountID }) { return true }
             guard c.matchChatNames else { return false }
@@ -178,12 +172,47 @@ enum ClientMatcher {
         }
     }
 
+    /// A domain rule ("gatehouse.co.uk") matches it and its subdomains; an address rule matches exactly.
+    static func senderMatches(_ rule: String, _ item: BuddyItem) -> Bool {
+        let addr = (item.fromAddress ?? "").lowercased()
+        let r = rule.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: " @"))
+        guard !r.isEmpty else { return false }
+        return r.contains("@") ? addr == r : (addr.hasSuffix("@" + r) || addr.hasSuffix("." + r))
+    }
+
+    /// What keywords are looked for in: subject, preview and sender name.
+    static func mailText(_ item: BuddyItem) -> String {
+        item.title + " " + (item.detail ?? "") + " " + (item.from ?? "")
+    }
+
     /// Case-insensitive match on word boundaries: "Hub" matches "IE Hub team" but not "GitHub".
     static func containsWord(_ needle: String, in haystack: String) -> Bool {
         let n = needle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !n.isEmpty else { return false }
         let pattern = "(?<![\\p{L}\\p{N}])" + NSRegularExpression.escapedPattern(for: n) + "(?![\\p{L}\\p{N}])"
         return haystack.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil
+    }
+}
+
+// MARK: - Muted mail
+
+/// An account's mute rules: mail from these senders, or with these words, never pops up.
+enum MailFilter {
+    static func isMuted(_ item: BuddyItem, _ account: AccountConfig) -> Bool {
+        guard item.source == .mail else { return false }
+        return account.mutedSenders.contains { ClientMatcher.senderMatches($0, item) }
+            || account.mutedKeywords.contains { ClientMatcher.containsWord($0, in: ClientMatcher.mailText(item)) }
+    }
+
+    /// Drops muted mail from a fetch, including from the live IDs, so muted mail already on screen clears too.
+    /// Returns the IDs dropped.
+    static func apply(_ result: inout FetchResult, _ account: AccountConfig) -> Set<String> {
+        guard result.source == .mail else { return [] }
+        let muted = Set(result.items.filter { isMuted($0, account) }.map(\.id))
+        guard !muted.isEmpty else { return [] }
+        result.items.removeAll { muted.contains($0.id) }
+        result.liveIDs.subtract(muted)
+        return muted
     }
 }
 

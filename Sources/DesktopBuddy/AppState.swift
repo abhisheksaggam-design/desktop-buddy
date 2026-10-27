@@ -28,6 +28,8 @@ final class AppState: ObservableObject {
     @Published var signedIn: Set<String> = []                     // account IDs with a saved sign-in
     @Published var checking: Set<String> = []                     // account IDs being checked right now
     @Published private(set) var snoozed: [Snoozed] = [] { didSet { JSONFile.save(snoozed, to: Paths.snoozed) } }
+    @Published var screenshotsAllowedUntil: Date?                // "Allow Screenshots for 1 Minute"
+    @Published var coachStep: CoachStep?                          // tip showing in the menu bar dropdown
     @Published var expired: Set<String> = []                      // account IDs whose sign-in the provider rejected
 
     /// accountID -> the address that actually signed in, when it isn't the account's email.
@@ -35,6 +37,9 @@ final class AppState: ObservableObject {
 
     /// True when the account can't be checked until you sign in (never, expired, or as someone else).
     func needsSignIn(_ id: String) -> Bool { !signedIn.contains(id) || expired.contains(id) || wrongAccount[id] != nil }
+
+    /// Muted mail IDs, so Gmail doesn't download them again every check. Cleared when mute rules change.
+    var mutedMail: Set<String> = []
 
     /// IDs already shown (or dismissed) so they never pop up twice.
     private var seen: [String] = [] { didSet { JSONFile.save(seen, to: Paths.seen) } }
@@ -124,7 +129,15 @@ final class AppState: ObservableObject {
 
     func update(_ a: AccountConfig) {
         guard let i = config.accounts.firstIndex(where: { $0.id == a.id }) else { return }
+        let old = config.accounts[i]
         config.accounts[i] = a
+        if old.mutedSenders != a.mutedSenders || old.mutedKeywords != a.mutedKeywords || old.onlyLabelsList != a.onlyLabelsList {
+            // Rules changed: muted mail may now be wanted (forget the cache), and newly muted mail leaves at once.
+            mutedMail = mutedMail.filter { !$0.hasPrefix("mail:\(a.id):") }
+            let before = items.count
+            items.removeAll { $0.accountID == a.id && MailFilter.isMuted($0, a) }
+            if items.count != before { tidyAfterRemoval() }
+        }
         // Turning a service off clears what it was showing.
         let watched: [(ItemSource, Bool)] = [(.mail, a.watchMail), (.chat, a.watchChat), (.meeting, a.watchMeetings), (.task, a.watchTasks)]
         let off = watched.filter { !$0.1 }.map(\.0)
@@ -156,7 +169,7 @@ final class AppState: ObservableObject {
         for item in fresh { markSeen(item.id) }
         items.insert(contentsOf: fresh.sorted { $0.date > $1.date }, at: 0)
         lastArrival = fresh.max { $0.date < $1.date }
-        if config.playSound { NSSound(named: "Glass")?.play() }
+        if config.playSound, let lead = Sounds.leadSource(of: fresh) { Sounds.play(config.sound(for: lead)) }
         return fresh.count
     }
 
@@ -186,7 +199,7 @@ final class AppState: ObservableObject {
     /// Self-test only: forget everything seen/snoozed so each scenario starts clean.
     func resetForTesting() {
         seen = []; seenSet = []; snoozed = []; items = []
-        expired = []; wrongAccount = [:]; serviceStatus = [:]
+        expired = []; wrongAccount = [:]; serviceStatus = [:]; mutedMail = []
     }
 
     /// Removes sample items left over from a `--demo` run.

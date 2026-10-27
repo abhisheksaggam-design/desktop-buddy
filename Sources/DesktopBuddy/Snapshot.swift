@@ -28,6 +28,12 @@ enum Snapshot {
             router.selection = pane
             renderWindow(AppDelegate.makeSettingsWindow(), to: out.appendingPathComponent("\(name).png"))
         }
+        if let a = AppState.shared.config.accounts.first {
+            let account = Binding(get: { AppState.shared.account(a.id) ?? a }, set: { AppState.shared.update($0) })
+            render(Form { MailFilterSections(account: account) }.formStyle(.grouped)
+                    .background(Color(nsColor: .windowBackgroundColor)),
+                   size: NSSize(width: 580, height: 620), to: out.appendingPathComponent("settings-account-mail.png"))
+        }
         render(AddAccountSheet(provider: .microsoft).background(Color(nsColor: .windowBackgroundColor)),
                size: NSSize(width: 520, height: 520), to: out.appendingPathComponent("add-account.png"))
         AppState.shared.expanded = true
@@ -48,6 +54,40 @@ enum Snapshot {
         NSApp.appearance = nil
         render(MenuBarPopover(openSettings: {}).background(Color(nsColor: .windowBackgroundColor)),
                size: NSSize(width: 360, height: 520), to: out.appendingPathComponent("popover.png"))
+        for (name, look) in [("popover-dark", NSAppearance.Name.darkAqua), ("popover-light", .aqua)] {
+            NSApp.appearance = NSAppearance(named: look)
+            render(MenuBarPopover(openSettings: {}).background(Color(nsColor: .windowBackgroundColor)),
+                   size: NSSize(width: 360, height: 560), to: out.appendingPathComponent("\(name).png"))
+        }
+        NSApp.appearance = nil
+        // Dropdown tips, one picture per step.
+        for step in CoachStep.steps(hasAccounts: !AppState.shared.config.accounts.isEmpty) {
+            AppState.shared.coachStep = step
+            render(MenuBarPopover(openSettings: {}).background(Color(nsColor: .windowBackgroundColor)),
+                   size: NSSize(width: 360, height: 560), to: out.appendingPathComponent("popover-tip-\(step.rawValue + 1).png"))
+        }
+        AppState.shared.coachStep = nil
+        for page in TourPage.allCases {
+            render(TourView(start: page, finish: { _ in }), size: NSSize(width: 560, height: 470),
+                   to: out.appendingPathComponent("tour-\(page.rawValue + 1).png"))
+        }
+        for (name, look) in [("menubar-dark", NSAppearance.Name.darkAqua), ("menubar-light", .aqua)] {
+            NSApp.appearance = NSAppearance(named: look)
+            let bar = HStack(spacing: 24) {
+                ForEach(0..<3, id: \.self) { i in let (count, paused) = [(0, false), (3, false), (0, true)][i]
+                    HStack(spacing: 3) {
+                        Image(nsImage: MenuBarMark.image(paused: paused)).renderingMode(.template)
+                        let t = MenuBarMark.title(count: count, paused: paused)
+                        if !t.isEmpty { Text(t).font(.system(size: 13, weight: .semibold)).monospacedDigit() }
+                    }
+                }
+            }
+            .foregroundStyle(.primary).padding(.horizontal, 20)
+            .frame(width: 220, height: 30).background(.bar)
+            render(bar.scaleEffect(3).frame(width: 660, height: 90), size: NSSize(width: 660, height: 90),
+                   to: out.appendingPathComponent("\(name).png"))
+        }
+        NSApp.appearance = nil
     }
 
     private static func render<V: View>(_ view: V, size: NSSize, to url: URL) {

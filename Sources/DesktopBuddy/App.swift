@@ -22,10 +22,10 @@ enum Main {
 }
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPopoverDelegate {
     private var statusItem: NSStatusItem!
     private let popover = NSPopover()
-    private var settingsWindow: NSWindow?
+    private(set) var settingsWindow: NSWindow?
     private var bag = Set<AnyCancellable>()
 
     func applicationDidFinishLaunching(_ note: Notification) {
@@ -38,10 +38,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         popover.behavior = .transient
         popover.animates = true
-        popover.contentViewController = NSHostingController(rootView: MenuBarPopover(openSettings: { [weak self] in
-            self?.popover.performClose(nil)
-            self?.openSettings()
-        }))
+        popover.contentViewController = NSHostingController(rootView: MenuBarPopover(
+            openSettings: { [weak self] in
+                self?.popover.performClose(nil)
+                self?.openSettings()
+            },
+            showTour: { [weak self] in
+                self?.popover.performClose(nil)
+                self?.showTour()
+            },
+            checkForUpdates: { [weak self] in
+                self?.popover.performClose(nil)
+                self?.checkForUpdates()
+            }))
+        popover.delegate = self
+        TourController.shared.onClose = { [weak self] addAccount in
+            if addAccount || AppState.shared.config.accounts.isEmpty {
+                self?.openSettings()
+                if addAccount { SettingsRouter.shared.showingProviderPicker = true }
+            } else if self?.settingsWindow?.isVisible != true {
+                NSApp.setActivationPolicy(.accessory)
+            }
+        }
 
         AppState.shared.$items
             .combineLatest(AppState.shared.$config.map(\.paused).removeDuplicates())
@@ -59,8 +77,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             return
         }
         AppState.shared.purgeDemoItems()
-        // First launch: open Settings on the empty Accounts state.
-        if AppState.shared.config.accounts.isEmpty {
+        // First launch: the welcome tour, which ends in Settings to add an account.
+        if TourController.shouldShowOnLaunch(AppState.shared.config) {
+            showTour()
+        } else if AppState.shared.config.accounts.isEmpty {
             SettingsRouter.shared.selection = nil
             openSettings()
         }
@@ -68,11 +88,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func updateIcon(count: Int, paused: Bool) {
         guard let button = statusItem.button else { return }
-        let name = paused ? "bell.slash" : (count > 0 ? "bell.badge" : "bell")
-        let img = NSImage(systemSymbolName: name, accessibilityDescription: "Desktop Buddy")
-        img?.isTemplate = true
-        button.image = img
-        button.title = count > 0 && !paused ? " \(count)" : ""
+        button.image = MenuBarMark.image(paused: paused)
+        let title = MenuBarMark.title(count: count, paused: paused)
+        button.attributedTitle = NSAttributedString(string: title.isEmpty ? "" : " " + title, attributes: [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .semibold),
+            .baselineOffset: 0.5,
+        ])
         button.imagePosition = .imageLeading
         button.setAccessibilityLabel(paused ? "Desktop Buddy, paused" : "Desktop Buddy, \(count) waiting")
     }
@@ -84,6 +105,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                          action: #selector(togglePause), keyEquivalent: "").target = self
             menu.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: ",").target = self
             menu.addItem(withTitle: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "").target = self
+            menu.addItem(withTitle: "Show Tour", action: #selector(showTour), keyEquivalent: "").target = self
+            if AppState.shared.config.hidesFromSharing {
+                menu.addItem(withTitle: "Allow Screenshots for 1 Minute", action: #selector(allowScreenshots), keyEquivalent: "").target = self
+            }
             menu.addItem(.separator())
             menu.addItem(withTitle: "Quit Desktop Buddy", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
             statusItem.menu = menu
@@ -100,6 +125,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     @objc private func togglePause() { AppState.shared.config.paused.toggle() }
+
+    @objc func allowScreenshots() { OverlayController.shared.allowScreenshots() }
+
+    /// Welcome tour window; the dropdown tips play again the next time it opens.
+    @objc func showTour() {
+        AppState.shared.replayTour()
+        TourController.shared.show()
+    }
+
+    func popoverDidClose(_ notification: Notification) {
+        // Closing the dropdown mid-tips counts as seen, so they don't come back every time.
+        if AppState.shared.coachStep != nil { AppState.shared.finishCoachMarks() }
+    }
 
     /// Checks now and says what it found: a new version (Download / Later), up to date, or offline.
     @objc func checkForUpdates() {
@@ -127,6 +165,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     @objc func openSettings() {
+        if NSEvent.modifierFlags.contains(.option) { SettingsRouter.shared.adminRequested = true }
         if settingsWindow == nil {
             let w = Self.makeSettingsWindow()
             w.minSize = NSSize(width: 760, height: 540)
@@ -160,6 +199,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         guard (notification.object as? NSWindow) === settingsWindow else { return }
+        SettingsRouter.shared.adminRequested = false
+        if SettingsRouter.shared.selection == .team { SettingsRouter.shared.selection = .general }
         NSApp.setActivationPolicy(.accessory)
     }
 

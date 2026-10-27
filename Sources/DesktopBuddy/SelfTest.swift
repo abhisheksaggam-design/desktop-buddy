@@ -18,6 +18,12 @@ enum SelfTest {
         }
         Keychain.disabled = true
         clientRules()
+        mailFilters()
+        labelQueries()
+        sounds()
+        tour()
+        placement()
+        adminSettings()
         inboxFlows()
         serviceSwitches()
         clientReassignment()
@@ -169,6 +175,158 @@ enum SelfTest {
         check("short keyword whole-word (Hub ≠ GitHub)", !ClientMatcher.containsWord("Hub", in: "Pushed to GitHub")
               && ClientMatcher.containsWord("Hub", in: "IE Hub weekly"))
         check("keyword with punctuation (R&D)", ClientMatcher.containsWord("R&D", in: "Q4 R&D budget"))
+    }
+
+    // MARK: - Muted mail, labels, sounds
+
+    private static func mailFilters() {
+        begin("Muted mail")
+        let s = freshState()
+        var g = s.config.accounts[0]
+        g.mutedSenders = ["news.example.com", "noreply@shop.com"]
+        g.mutedKeywords = ["newsletter"]
+        let muted = { (i: BuddyItem) in MailFilter.isMuted(i, g) }
+        check("muted domain", muted(mail("m1", account: "acc-g", address: "a@news.example.com", subject: "Hi")))
+        check("muted domain's subdomain", muted(mail("m2", account: "acc-g", address: "a@eu.news.example.com", subject: "Hi")))
+        check("look-alike domain is not muted", !muted(mail("m3", account: "acc-g", address: "a@fakenews.example.com", subject: "Hi")))
+        check("muted exact address", muted(mail("m4", account: "acc-g", address: "noreply@shop.com", subject: "Order")))
+        check("other address at that domain is not", !muted(mail("m5", account: "acc-g", address: "help@shop.com", subject: "Order")))
+        check("muted keyword, any case", muted(mail("m6", account: "acc-g", address: "a@b.com", subject: "Our NEWSLETTER")))
+        check("keyword is a whole word", !muted(mail("m7", account: "acc-g", address: "a@b.com", subject: "newsletters archive")))
+        check("chats are never muted by mail rules", !MailFilter.isMuted(chat("c1", account: "acc-g", space: "newsletter", ref: "s"), g))
+        check("old settings have no mute rules", AccountConfig(label: "x", email: "").mutedSenders.isEmpty)
+
+        let keep = mail("f1", account: "acc-g", address: "jo@client.com", subject: "Contract")
+        let drop = mail("f2", account: "acc-g", address: "a@news.example.com", subject: "Weekly")
+        var r = FetchResult(source: .mail, items: [keep, drop], liveIDs: [keep.id, drop.id])
+        let dropped = MailFilter.apply(&r, g)
+        check("fetch keeps wanted mail", r.items.map(\.id) == [keep.id])
+        check("muted mail leaves the live list too", !r.liveIDs.contains(drop.id) && dropped == [drop.id])
+
+        s.config.clients = [ClientConfig(name: "News", senders: ["news.example.com"])]
+        s.offer([drop, keep])
+        s.update(g)
+        check("saving a mute rule clears matching mail at once", !s.items.contains { $0.id == drop.id })
+        check("…and keeps other mail", s.items.contains { $0.id == keep.id })
+        let other = mail("f3", account: "acc-m", address: "a@news.example.com", subject: "Weekly")
+        check("rules don't leak to another account", !MailFilter.isMuted(other, s.config.accounts[1]))
+        s.mutedMail = ["mail:acc-g:old"]
+        g.mutedKeywords = []
+        s.update(g)
+        check("changing rules forgets cached muted mail", s.mutedMail.isEmpty)
+    }
+
+    private static func labelQueries() {
+        begin("Only mail with chosen labels")
+        var g = AccountConfig(providerChoice: .google, label: "G", email: "")
+        check("default: inbox only", GmailSource.listQueries(g).map(\.1["q"]) == ["in:inbox is:unread newer_than:2d"])
+        g.onlyLabelsList = []
+        check("labels chosen but none picked: no mail", GmailSource.listQueries(g).isEmpty)
+        g.onlyLabels = [MailLabel(id: "Label_1", name: "Urgent"), MailLabel(id: "Label_2", name: "Client/Acme")]
+        let q = GmailSource.listQueries(g)
+        check("one Gmail query per label", q.map(\.1["labelIds"]) == ["Label_1", "Label_2"])
+        check("labelled mail is found outside the inbox", q.allSatisfy { !($0.1["q"] ?? "").contains("in:inbox") })
+        check("queries carry the label name for errors", q.map(\.0) == ["Urgent", "Client/Acme"])
+
+        var m = AccountConfig(providerChoice: .microsoft, label: "M", email: "")
+        let since = Date(timeIntervalSince1970: 0)
+        check("Outlook default: inbox", OutlookMailSource.listQueries(m, since: since).first?.0.hasSuffix("/mailFolders/inbox/messages") == true)
+        m.onlyLabels = [MailLabel(id: "Red", name: "Red"), MailLabel(id: "O'Brien", name: "O'Brien")]
+        let o = OutlookMailSource.listQueries(m, since: since)
+        check("Outlook: all folders per category", o.count == 2 && o.allSatisfy { $0.0.hasSuffix("/me/messages") })
+        check("Outlook category filter", o[0].1["$filter"]?.hasSuffix("categories/any(c:c eq 'Red')") == true)
+        check("apostrophes are escaped", o[1].1["$filter"]?.contains("eq 'O''Brien'") == true)
+    }
+
+    private static func sounds() {
+        begin("Sounds")
+        var c = AppConfig()
+        check("every type defaults to Glass", ItemSource.allCases.allSatisfy { c.sound(for: $0) == "Glass" })
+        c.setSound("Hero", for: .meeting)
+        c.setSound(noSound, for: .mail)
+        check("a type can have its own sound", c.sound(for: .meeting) == "Hero" && c.sound(for: .chat) == "Glass")
+        check("a type can be silent", c.sound(for: .mail) == noSound)
+        let items = [mail("x", account: "a", address: "a@b.com", subject: "s"),
+                     BuddyItem(id: "meet:a:1", source: .meeting, accountID: "a", title: "Sync", date: Date())]
+        check("meeting sound wins over mail in one batch", Sounds.leadSource(of: items) == .meeting)
+        check("nothing new, no sound", Sounds.leadSource(of: []) == nil)
+        check("all sounds exist on this Mac", Sounds.all.allSatisfy { NSSound(named: $0) != nil })
+        let old = try? JSONDecoder().decode(AppConfig.self, from: Data(#"{"accounts":[{"label":"A","email":"a@b.com","id":"1","enabled":true,"watchMail":true,"watchChat":true,"watchMeetings":true,"watchTasks":true,"clientID":"","redirectPort":8766}],"reminders":[],"pollSeconds":60,"meetingLeadMinutes":10,"playSound":true,"paused":false}"#.utf8))
+        check("settings from before this update still load", old?.accounts.first?.labelsOnly == false && old?.sound(for: .chat) == "Glass")
+    }
+
+    private static func tour() {
+        begin("Tour and tips")
+        let s = freshState()
+        var fresh = AppConfig()
+        check("new users get the welcome tour", TourController.shouldShowOnLaunch(fresh))
+        fresh.tourSeen = true
+        check("…only once", !TourController.shouldShowOnLaunch(fresh))
+        check("existing users see it once after updating", TourController.shouldShowOnLaunch(s.config))
+        s.config.tourSeen = true
+        check("…and not again", !TourController.shouldShowOnLaunch(s.config))
+        check("…still signed in with their accounts", s.config.accounts.count == 2)
+        check("tips skip the accounts step without accounts", CoachStep.steps(hasAccounts: false) == [.header, .row, .footer])
+        check("tips go header → accounts → row → footer", CoachStep.steps(hasAccounts: true) == [.header, .accounts, .row, .footer])
+
+        s.config.tourSeen = nil; s.config.popoverTourSeen = nil; s.coachStep = nil
+        s.startCoachMarksIfNeeded()
+        check("no tips before the welcome tour", s.coachStep == nil)
+        s.config.tourSeen = true
+        s.startCoachMarksIfNeeded()
+        check("tips start after the tour", s.coachStep == .header)
+        s.nextCoachStep(); s.nextCoachStep(); s.nextCoachStep()
+        check("Next walks to the last tip", s.coachStep == .footer)
+        s.nextCoachStep()
+        check("Got It ends the tips and remembers", s.coachStep == nil && s.config.popoverTourSeen == true)
+        s.startCoachMarksIfNeeded()
+        check("tips don't come back by themselves", s.coachStep == nil)
+        s.replayTour()
+        s.startCoachMarksIfNeeded()
+        check("Show Tour plays the tips again", s.coachStep == .header)
+        s.finishCoachMarks()
+
+        check("menu bar shows the count", MenuBarMark.title(count: 3, paused: false) == "3")
+        check("no number when nothing waits", MenuBarMark.title(count: 0, paused: false).isEmpty)
+        check("no number while paused", MenuBarMark.title(count: 3, paused: true).isEmpty)
+    }
+
+    private static func placement() {
+        begin("Logos: main display, screen sharing")
+        let main = NSRect(x: 0, y: 80, width: 1440, height: 820)       // visible frame above a Dock
+        let size = NSSize(width: 200, height: 120)
+        let f = OverlayPlacement.frame(size: size, offset: OverlayPlacement.defaultOffset, in: main)
+        check("default sits in the bottom-right corner", f.maxX == 1416 && f.minY == 104)
+        let far = OverlayPlacement.frame(size: size, offset: CGSize(width: -900, height: 24), in: main)
+        check("dragged onto a screen to the right → back on the main display", far.maxX == main.maxX)
+        let left = OverlayPlacement.frame(size: size, offset: CGSize(width: 5000, height: 24), in: main)
+        check("dragged off the left → stays fully on screen", left.minX == main.minX)
+        let up = OverlayPlacement.frame(size: size, offset: CGSize(width: 24, height: 5000), in: main)
+        check("never goes under the menu bar", up.maxY == main.maxY)
+        let down = OverlayPlacement.frame(size: size, offset: CGSize(width: 24, height: -300), in: main)
+        check("never goes under the Dock", down.minY == main.minY)
+        let smaller = NSRect(x: 0, y: 0, width: 1280, height: 800)
+        let moved = OverlayPlacement.frame(size: size, offset: CGSize(width: 40, height: 60), in: smaller)
+        check("keeps its spot from the corner when the display changes", moved.maxX == 1240 && moved.minY == 60)
+        let p = NSPoint(x: 1300, y: 200)
+        check("offset round-trips", OverlayPlacement.frame(size: size, offset: OverlayPlacement.offset(of: p, in: main), in: main).maxX == 1300)
+
+        let now = Date()
+        check("hidden from sharing by default", AppConfig().hidesFromSharing
+              && OverlayPlacement.sharingHidden(protection: true, allowedUntil: nil, now: now))
+        check("screenshots allowed for the minute", !OverlayPlacement.sharingHidden(protection: true, allowedUntil: now + 60, now: now))
+        check("…then hidden again", OverlayPlacement.sharingHidden(protection: true, allowedUntil: now - 1, now: now))
+        check("can be turned off for good", !OverlayPlacement.sharingHidden(protection: false, allowedUntil: nil, now: now))
+    }
+
+    private static func adminSettings() {
+        begin("Admin settings")
+        let ready = TeamConfig(googleClientID: "123-abc.apps.googleusercontent.com")
+        check("hidden when sign-in is set up", !SettingsRouter.showsAdmin(requested: false, team: ready))
+        check("shown when an admin holds Option", SettingsRouter.showsAdmin(requested: true, team: ready))
+        check("shown when sign-in isn't set up, to fix it", SettingsRouter.showsAdmin(requested: false, team: TeamConfig()))
+        check("Microsoft-only setups count as set up",
+              !SettingsRouter.showsAdmin(requested: false, team: TeamConfig(microsoftClientID: "0000")))
     }
 
     // MARK: - Inbox state

@@ -12,19 +12,25 @@ final class OverlayController {
     private let host: NSHostingView<OverlayView>
     private var bag = Set<AnyCancellable>()
     private let state = AppState.shared
-    /// Bottom-right corner of the panel in screen coordinates; persisted.
-    private var anchor: NSPoint {
+    /// Where the logos sit: the gap between the panel's bottom-right corner and the main display's
+    /// bottom-right corner (inside the Dock and menu bar). Persisted, so it survives display changes.
+    private var offset: CGSize {
         get {
             let d = UserDefaults.standard
-            if d.object(forKey: "anchorX") != nil {
-                return NSPoint(x: d.double(forKey: "anchorX"), y: d.double(forKey: "anchorY"))
+            if d.object(forKey: "anchorDX") != nil {
+                return CGSize(width: d.double(forKey: "anchorDX"), height: d.double(forKey: "anchorDY"))
             }
-            let vf = NSScreen.main?.visibleFrame ?? .init(x: 0, y: 0, width: 1440, height: 900)
-            return NSPoint(x: vf.maxX - 24, y: vf.minY + 24)
+            // Before v2.2 the position was absolute; keep it if it's on the main display.
+            if d.object(forKey: "anchorX") != nil, let vf = OverlayPlacement.mainDisplay {
+                let old = NSPoint(x: d.double(forKey: "anchorX"), y: d.double(forKey: "anchorY"))
+                d.removeObject(forKey: "anchorX"); d.removeObject(forKey: "anchorY")
+                if vf.insetBy(dx: -1, dy: -1).contains(old) { return OverlayPlacement.offset(of: old, in: vf) }
+            }
+            return OverlayPlacement.defaultOffset
         }
         set {
-            UserDefaults.standard.set(newValue.x, forKey: "anchorX")
-            UserDefaults.standard.set(newValue.y, forKey: "anchorY")
+            UserDefaults.standard.set(newValue.width, forKey: "anchorDX")
+            UserDefaults.standard.set(newValue.height, forKey: "anchorDY")
         }
     }
 
@@ -49,21 +55,39 @@ final class OverlayController {
                 DispatchQueue.main.async { self?.update() }
             }
             .store(in: &bag)
+        // Displays plugged in, unplugged or rearranged: go back to the main display.
+        NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.update() }
+            .store(in: &bag)
     }
 
     func update() {
-        let shouldShow = !state.items.isEmpty && !state.config.paused
-        guard shouldShow else { panel.orderOut(nil); return }
+        panel.sharingType = OverlayPlacement.sharingHidden(protection: state.config.hidesFromSharing,
+                                                           allowedUntil: state.screenshotsAllowedUntil) ? .none : .readOnly
+        guard !state.items.isEmpty && !state.config.paused else { panel.orderOut(nil); return }
         host.layoutSubtreeIfNeeded()
         let size = host.fittingSize
-        let a = anchor
-        panel.setFrame(NSRect(x: a.x - size.width, y: a.y, width: size.width, height: size.height), display: true)
+        let vf = OverlayPlacement.mainDisplay ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        panel.setFrame(OverlayPlacement.frame(size: size, offset: offset, in: vf), display: true)
         if !panel.isVisible { panel.orderFrontRegardless() }
     }
 
+    /// macOS uses one switch for screen sharing and screenshots, so open it briefly for a screenshot.
+    func allowScreenshots(for seconds: TimeInterval = 60) {
+        let until = Date().addingTimeInterval(seconds)
+        state.screenshotsAllowedUntil = until
+        update()
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds + 0.1) { [weak self] in
+            guard let self, self.state.screenshotsAllowedUntil == until else { return }
+            self.state.screenshotsAllowedUntil = nil
+            self.update()
+        }
+    }
+
     func resetPosition() {
-        UserDefaults.standard.removeObject(forKey: "anchorX")
-        UserDefaults.standard.removeObject(forKey: "anchorY")
+        UserDefaults.standard.removeObject(forKey: "anchorDX")
+        UserDefaults.standard.removeObject(forKey: "anchorDY")
         update()
     }
 
@@ -74,8 +98,45 @@ final class OverlayController {
         panel.setFrameOrigin(f.origin)
     }
 
+    /// After a drag: remember the spot, kept inside the main display (a logo dropped on another
+    /// screen slides back to the nearest edge of the main one).
     private func saveAnchor() {
-        anchor = NSPoint(x: panel.frame.maxX, y: panel.frame.minY)
+        guard let vf = OverlayPlacement.mainDisplay else { return }
+        let size = panel.frame.size
+        let rough = OverlayPlacement.offset(of: NSPoint(x: panel.frame.maxX, y: panel.frame.minY), in: vf)
+        let target = OverlayPlacement.frame(size: size, offset: rough, in: vf)
+        offset = OverlayPlacement.offset(of: NSPoint(x: target.maxX, y: target.minY), in: vf)
+        if target.origin != panel.frame.origin {
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.25
+                panel.animator().setFrame(target, display: true)
+            }
+        }
+    }
+}
+
+/// Placement maths for the logos, kept apart so it can be tested.
+enum OverlayPlacement {
+    static let defaultOffset = CGSize(width: 24, height: 24)
+
+    /// The main display (the one with the menu bar), minus the menu bar and Dock.
+    @MainActor static var mainDisplay: NSRect? { NSScreen.screens.first?.visibleFrame }
+
+    /// Gap from the display's bottom-right corner to a panel corner point.
+    static func offset(of corner: NSPoint, in vf: NSRect) -> CGSize {
+        CGSize(width: vf.maxX - corner.x, height: corner.y - vf.minY)
+    }
+
+    /// The panel's frame for a saved offset, clamped so the whole panel stays on the display.
+    static func frame(size: NSSize, offset: CGSize, in vf: NSRect) -> NSRect {
+        let maxX = min(max(vf.maxX - offset.width, vf.minX + size.width), vf.maxX)
+        let minY = max(min(vf.minY + offset.height, vf.maxY - size.height), vf.minY)
+        return NSRect(x: maxX - size.width, y: minY, width: size.width, height: size.height)
+    }
+
+    /// Kept out of screen sharing (and, by macOS, screenshots) unless turned off or briefly allowed.
+    static func sharingHidden(protection: Bool, allowedUntil: Date?, now: Date = Date()) -> Bool {
+        protection && !(allowedUntil.map { $0 > now } ?? false)
     }
 }
 
@@ -339,10 +400,10 @@ private struct NotificationList: View {
                 Text("Notifications").font(.system(size: 15, weight: .semibold))
             }
             Spacer()
-            Button(state.filterOwner == nil ? "Clear All" : "Clear") {
+            PillButton(title: state.filterOwner == nil ? "Clear All" : "Clear", symbol: "xmark",
+                       label: state.filterOwner == nil ? "Clear all notifications" : "Clear \(state.ownerName(state.filterOwner!))") {
                 withAnimation(buddySpring) { shown.forEach { state.dismiss($0.id) } }
             }
-            .buttonStyle(.borderless).font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
             Button { state.expanded = false } label: {
                 Image(systemName: "xmark.circle.fill").font(.system(size: 16)).symbolRenderingMode(.hierarchical)
             }
@@ -396,8 +457,9 @@ private struct NotificationList: View {
                 HStack(spacing: 6) {
                     Text(state.ownerName(owner)).font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
                     Spacer()
-                    Button("Clear") { withAnimation(buddySpring) { state.clearAll(owner: owner) } }
-                        .buttonStyle(.borderless).font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
+                    PillButton(title: "Clear", symbol: "xmark", label: "Clear \(state.ownerName(owner))") {
+                        withAnimation(buddySpring) { state.clearAll(owner: owner) }
+                    }
                 }
                 .padding(.horizontal, 4)
             }

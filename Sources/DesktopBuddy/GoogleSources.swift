@@ -60,13 +60,23 @@ struct FetchResult {
 enum GmailSource {
     static func fetch(_ api: APIClient) async throws -> FetchResult {
         let acc = api.account
-        let list = try await api.get("https://gmail.googleapis.com/gmail/v1/users/me/messages",
-                                     ["q": "in:inbox is:unread newer_than:2d", "maxResults": "25"])
-        let ids = (list["messages"] as? [[String: Any]] ?? []).compactMap { $0["id"] as? String }
+        var ids: [String] = []
+        for (label, query) in listQueries(acc) {
+            let list: [String: Any]
+            do {
+                list = try await api.get("https://gmail.googleapis.com/gmail/v1/users/me/messages", query)
+            } catch let e as APIError where label != nil && (e.status == 400 || e.status == 404) {
+                throw APIError(status: e.status, host: e.host,
+                               message: "The label “\(label!)” no longer exists in Gmail. Remove it under Mail.")
+            }
+            for id in (list["messages"] as? [[String: Any]] ?? []).compactMap({ $0["id"] as? String }) where !ids.contains(id) {
+                ids.append(id)
+            }
+        }
         let live = Set(ids.map { "mail:\(acc.id):\($0)" })
 
         var items: [BuddyItem] = []
-        let existing = await MainActor.run { Set(AppState.shared.items.map(\.id)) }
+        let existing = await MainActor.run { Set(AppState.shared.items.map(\.id)).union(AppState.shared.mutedMail) }
         for id in ids where !existing.contains("mail:\(acc.id):\(id)") {
             let msg = try await api.get("https://gmail.googleapis.com/gmail/v1/users/me/messages/\(id)?format=metadata&metadataHeaders=From&metadataHeaders=Subject")
             let rawFrom = header(msg, "From") ?? ""
@@ -82,6 +92,23 @@ enum GmailSource {
                 fromAddress: senderAddress(rawFrom)))
         }
         return FetchResult(source: .mail, items: items, liveIDs: live)
+    }
+
+    /// Unread inbox mail; or, with "only these labels", unread mail with each label wherever it's filed.
+    /// Each query comes with the label name it's for (nil for the inbox), to explain errors.
+    static func listQueries(_ acc: AccountConfig) -> [(String?, [String: String])] {
+        guard acc.labelsOnly else { return [(nil, ["q": "in:inbox is:unread newer_than:2d", "maxResults": "25"])] }
+        return acc.onlyLabels.map { ($0.name, ["labelIds": $0.id, "q": "is:unread newer_than:2d", "maxResults": "25"]) }
+    }
+
+    /// Your own labels (not Gmail's built-in ones), A to Z.
+    static func labels(_ api: APIClient) async throws -> [MailLabel] {
+        let json = try await api.get("https://gmail.googleapis.com/gmail/v1/users/me/labels")
+        return (json["labels"] as? [[String: Any]] ?? []).compactMap { l -> MailLabel? in
+            guard (l["type"] as? String) == "user", let id = l["id"] as? String, let name = l["name"] as? String else { return nil }
+            return MailLabel(id: id, name: name)
+        }
+        .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
     /// "Priya <priya@x.com>" -> "priya@x.com"

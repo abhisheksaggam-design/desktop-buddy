@@ -155,7 +155,7 @@ https://www.googleapis.com/auth/directory.readonly
 ### 4.1 Create it
 
 **Option A: in the app (easiest)**
-1. Open **Desktop Buddy → Settings → Team Setup**.
+1. Hold **⌥ Option** while opening Settings (from the menu bar dropdown or the right-click menu), then open **Team Setup**. It's hidden from everyday users once sign-in is set up.
 2. Enter the Google client ID and secret, and the Microsoft client ID.
 3. Click **Export Setup File…** and save `team.json`.
 
@@ -182,7 +182,7 @@ With an iOS-type Google client and the Microsoft client, `team.json` holds only 
 
 ### 4.3 Install it (each person)
 
-**Option A:** open **Settings → Team Setup → Import Setup File…** and pick `team.json`.
+**Option A:** hold **⌥ Option** while opening Settings, then **Team Setup → Import Setup File…** and pick `team.json`. (In a copy without sign-in set up, Team Setup shows without Option.)
 
 **Option B:** copy it into the app's data folder:
 
@@ -199,7 +199,7 @@ The app looks for `team.json` in this order:
 1. `~/Library/Application Support/DesktopBuddy/team.json` (this Mac)
 2. `Desktop Buddy.app/Contents/Resources/team.json` (built into the app)
 
-Settings → Team Setup shows which one is in use.
+Settings → Team Setup (hold ⌥ Option while opening Settings) shows which one is in use.
 
 ---
 
