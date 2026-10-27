@@ -226,8 +226,9 @@ struct OverlayView: View {
 /// (like macOS widget and Stage Manager labels). The logo carries the colour, not the label.
 private struct OwnerTag: View {
     let owner: String
+    @ObservedObject var state = AppState.shared      // so a rename shows straight away
     var body: some View {
-        Text(AppState.shared.ownerName(owner))
+        Text(state.ownerName(owner))
             .font(.system(size: 11, weight: .medium))
             .lineLimit(1)
             .fixedSize()
@@ -328,6 +329,7 @@ private struct CardText: View {
 // MARK: - Arrival banner ("glimpse")
 
 private struct SpeechBubble: View {
+    @ObservedObject var state = AppState.shared
     let item: BuddyItem
     let more: Int
 
@@ -338,7 +340,7 @@ private struct SpeechBubble: View {
                 CardText(item: item, showOwner: true)
             }
             if more > 0 {
-                Text("\(more) more from \(AppState.shared.ownerName(item.owner))")
+                Text("\(more) more from \(state.ownerName(item.owner))")
                     .font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
                     .padding(.leading, 44)
             }
