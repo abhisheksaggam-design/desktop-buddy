@@ -36,7 +36,6 @@ final class AppState: ObservableObject {
     @Published var checking: Set<String> = []                     // account IDs being checked right now
     @Published private(set) var snoozed: [Snoozed] = [] { didSet { JSONFile.save(snoozed, to: Paths.snoozed) } }
     @Published var screenshotsAllowedUntil: Date?                // "Allow Screenshots for 1 Minute"
-    @Published var coachStep: CoachStep?                          // tip showing in the menu bar dropdown
     @Published var expired: Set<String> = []                      // account IDs whose sign-in the provider rejected
 
     /// accountID -> the address that actually signed in, when it isn't the account's email.

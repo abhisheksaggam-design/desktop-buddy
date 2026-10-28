@@ -22,7 +22,7 @@ enum Main {
 }
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPopoverDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var statusItem: NSStatusItem!
     private let popover = NSPopover()
     private(set) var settingsWindow: NSWindow?
@@ -51,7 +51,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
                 self?.popover.performClose(nil)
                 self?.checkForUpdates()
             }))
-        popover.delegate = self
         TourController.shared.onClose = { [weak self] addAccount in
             if addAccount || AppState.shared.config.accounts.isEmpty {
                 self?.openSettings()
@@ -153,15 +152,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
 
     @objc func allowScreenshots() { OverlayController.shared.allowScreenshots() }
 
-    /// Welcome tour window; the dropdown tips play again the next time it opens.
+    /// Welcome tour window.
     @objc func showTour() {
-        AppState.shared.replayTour()
         TourController.shared.show()
-    }
-
-    func popoverDidClose(_ notification: Notification) {
-        // Closing the dropdown mid-tips counts as seen, so they don't come back every time.
-        if AppState.shared.coachStep != nil { AppState.shared.finishCoachMarks() }
     }
 
     /// Checks now and says what it found: a new version (Download / Later), up to date, or offline.

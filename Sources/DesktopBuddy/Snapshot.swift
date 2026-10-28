@@ -69,13 +69,6 @@ enum Snapshot {
                    size: NSSize(width: 360, height: 560), to: out.appendingPathComponent("\(name).png"))
         }
         NSApp.appearance = nil
-        // Dropdown tips, one picture per step.
-        for step in CoachStep.steps(hasAccounts: !AppState.shared.config.accounts.isEmpty) {
-            AppState.shared.coachStep = step
-            render(MenuBarPopover(openSettings: {}).background(Color(nsColor: .windowBackgroundColor)),
-                   size: NSSize(width: 360, height: 560), to: out.appendingPathComponent("popover-tip-\(step.rawValue + 1).png"))
-        }
-        AppState.shared.coachStep = nil
         for page in TourPage.allCases {
             render(TourView(start: page, finish: { _ in }), size: NSSize(width: 560, height: 470),
                    to: out.appendingPathComponent("tour-\(page.rawValue + 1).png"))

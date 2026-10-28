@@ -10,20 +10,18 @@ struct MenuBarPopover: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            header.coachTarget(.header)
+            header
             UpdateBanner()
             Divider()
             if !state.config.accounts.isEmpty {
-                accountsStrip.coachTarget(.accounts)
+                accountsStrip
                 Divider()
             }
             content
             Divider()
-            footer.coachTarget(.footer)
+            footer
         }
         .frame(width: 360)
-        .coachMarks()
-        .onAppear { state.startCoachMarksIfNeeded() }
     }
 
     // MARK: Header
@@ -114,9 +112,6 @@ struct MenuBarPopover: View {
             }
             .padding(24)
             .frame(maxWidth: .infinity)
-        } else if state.items.isEmpty && state.coachStep == .row {
-            // The tour needs a row to point at: show a sample one.
-            PopoverRow(item: .coachSample, sample: true, pointedAt: true).coachTarget(.row).padding(.vertical, 6)
         } else if state.items.isEmpty {
             VStack(spacing: 6) {
                 Image(systemName: "checkmark.circle").font(.system(size: 28)).foregroundStyle(.green)
@@ -132,9 +127,7 @@ struct MenuBarPopover: View {
                         let mine = state.items.filter { $0.owner == owner }
                         Section {
                             ForEach(mine) { item in
-                                let pointedAt = item.id == firstShownID
-                                PopoverRow(item: item, sample: false, pointedAt: pointedAt)
-                                    .coachTarget(.row, when: pointedAt)
+                                PopoverRow(item: item, sample: false)
                             }
                         } header: {
                             HStack(spacing: 6) {
@@ -157,11 +150,6 @@ struct MenuBarPopover: View {
             }
             .frame(maxHeight: 380)
         }
-    }
-
-    /// The first notification in the list, which the tour points at.
-    private var firstShownID: String? {
-        state.activeOwners.first.flatMap { o in state.items.first { $0.owner == o }?.id }
     }
 
     // MARK: Footer
@@ -200,12 +188,11 @@ struct MenuBarPopover: View {
 private struct PopoverRow: View {
     let item: BuddyItem
     var sample: Bool
-    var pointedAt = false
     @ObservedObject var state = AppState.shared
     @Local private var hover = false
 
     var body: some View {
-        let showActions = hover || (pointedAt && state.coachStep == .row)
+        let showActions = hover
         HStack(alignment: .top, spacing: 10) {
             SettingsIcon(symbol: item.source.symbol, tint: item.source.tint, size: 24)
             VStack(alignment: .leading, spacing: 1) {
@@ -254,13 +241,6 @@ private struct PopoverRow: View {
         .accessibilityAction(named: "Snooze") { state.snooze(item) }
         .accessibilityAction(named: "Done") { state.dismiss(item.id) }
     }
-}
-
-extension BuddyItem {
-    /// Shown only while the tour points at a notification and nothing real is waiting.
-    static let coachSample = BuddyItem(id: "coach:sample", source: .mail, accountID: nil, title: "Contract ready to sign",
-                                       from: "Sample sender", detail: "This is an example notification.",
-                                       date: Date(), url: URL(string: "https://example.com"))
 }
 
 /// "now", "4m", "2h", "3d" — compact like Notification Center.

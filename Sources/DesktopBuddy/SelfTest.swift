@@ -288,7 +288,7 @@ enum SelfTest {
     }
 
     private static func tour() {
-        begin("Tour and tips")
+        begin("Tour")
         let s = freshState()
         var fresh = AppConfig()
         check("new users get the welcome tour", TourController.shouldShowOnLaunch(fresh))
@@ -298,25 +298,6 @@ enum SelfTest {
         s.config.tourSeen = true
         check("…and not again", !TourController.shouldShowOnLaunch(s.config))
         check("…still signed in with their accounts", s.config.accounts.count == 2)
-        check("tips skip the accounts step without accounts", CoachStep.steps(hasAccounts: false) == [.header, .row, .footer])
-        check("tips go header → accounts → row → footer", CoachStep.steps(hasAccounts: true) == [.header, .accounts, .row, .footer])
-
-        s.config.tourSeen = nil; s.config.popoverTourSeen = nil; s.coachStep = nil
-        s.startCoachMarksIfNeeded()
-        check("no tips before the welcome tour", s.coachStep == nil)
-        s.config.tourSeen = true
-        s.startCoachMarksIfNeeded()
-        check("tips start after the tour", s.coachStep == .header)
-        s.nextCoachStep(); s.nextCoachStep(); s.nextCoachStep()
-        check("Next walks to the last tip", s.coachStep == .footer)
-        s.nextCoachStep()
-        check("Got It ends the tips and remembers", s.coachStep == nil && s.config.popoverTourSeen == true)
-        s.startCoachMarksIfNeeded()
-        check("tips don't come back by themselves", s.coachStep == nil)
-        s.replayTour()
-        s.startCoachMarksIfNeeded()
-        check("Show Tour plays the tips again", s.coachStep == .header)
-        s.finishCoachMarks()
 
         check("menu bar shows the count", MenuBarMark.title(count: 3, paused: false) == "3")
         check("no number when nothing waits", MenuBarMark.title(count: 0, paused: false).isEmpty)

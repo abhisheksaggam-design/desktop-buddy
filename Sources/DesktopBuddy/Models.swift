@@ -252,7 +252,6 @@ struct AppConfig: Codable, Equatable {
         set { shareProtection = newValue }
     }
     var tourSeen: Bool?                             // the welcome tour was finished or skipped
-    var popoverTourSeen: Bool?                      // the tips in the menu bar dropdown were seen
     var autoUpdateCheck: Bool?                      // nil = on
     var checkForUpdates: Bool {
         get { autoUpdateCheck ?? true }
