@@ -202,7 +202,6 @@ enum SelfTest {
         check("other address at that domain is not", !muted(mail("m5", account: "acc-g", address: "help@shop.com", subject: "Order")))
         check("muted keyword, any case", muted(mail("m6", account: "acc-g", address: "a@b.com", subject: "Our NEWSLETTER")))
         check("keyword is a whole word", !muted(mail("m7", account: "acc-g", address: "a@b.com", subject: "newsletters archive")))
-        check("chats are never muted by mail rules", !MailFilter.isMuted(chat("c1", account: "acc-g", space: "newsletter", ref: "s"), g))
         check("old settings have no mute rules", AccountConfig(label: "x", email: "").mutedSenders.isEmpty)
 
         let keep = mail("f1", account: "acc-g", address: "jo@client.com", subject: "Contract")
@@ -223,6 +222,30 @@ enum SelfTest {
         g.mutedKeywords = []
         s.update(g)
         check("changing rules forgets cached muted mail", s.mutedMail.isEmpty)
+
+
+        begin("Muted chats")
+        var h = s.config.accounts[0]
+        h.mutedChats = [ChatRef(accountID: h.id, chatID: "spaces/LOUD", name: "All hands")]
+        h.mutedChatKeywords = ["standup"]
+        check("mail mute rules don't touch chats", !MailFilter.isMuted(chat("c1", account: h.id, space: "newsletter", ref: "s"), g))
+        check("a muted chat is muted", MailFilter.isMuted(chat("c2", account: h.id, space: "All hands", ref: "spaces/LOUD"), h))
+        check("other chats are not", !MailFilter.isMuted(chat("c3", account: h.id, space: "Design", ref: "spaces/QUIET"), h))
+        check("chat keyword in the message", MailFilter.isMuted(chat("c4", account: h.id, space: "Design", ref: "x", text: "Standup in 5"), h))
+        check("chat keyword in the chat name", MailFilter.isMuted(chat("c5", account: h.id, space: "Daily standup", ref: "y"), h))
+        check("chat keyword is a whole word", !MailFilter.isMuted(chat("c6", account: h.id, space: "Design", ref: "z", text: "standups"), h))
+        check("chat keywords don't mute mail", !MailFilter.isMuted(mail("c7", account: h.id, address: "a@b.com", subject: "standup"), h))
+        check("old settings have no chat mutes", AccountConfig(label: "x", email: "").mutedChats.isEmpty)
+        let loud = chat("c8", account: h.id, space: "All hands", ref: "spaces/LOUD")
+        let calm = chat("c9", account: h.id, space: "Design", ref: "spaces/QUIET")
+        var cr = FetchResult(source: .chat, items: [loud, calm], liveIDs: [loud.id, calm.id])
+        _ = MailFilter.apply(&cr, h)
+        check("chat fetch drops muted chats", cr.items.map(\.id) == [calm.id] && !cr.liveIDs.contains(loud.id))
+        var plain = h; plain.mutedChats = []; plain.mutedChatKeywords = []
+        s.update(plain)
+        s.offer([loud, calm])
+        s.update(h)
+        check("muting a chat clears it at once", !s.items.contains { $0.id == loud.id } && s.items.contains { $0.id == calm.id })
     }
 
     private static func labelQueries() {

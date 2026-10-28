@@ -122,6 +122,9 @@ struct AccountConfig: Identifiable, Codable, Equatable {
     var mutedSendersList: [String]?            // "news.example.com" or "noreply@x.com": never notify
     var mutedKeywordsList: [String]?           // whole words in subject, preview or sender: never notify
     var onlyLabelsList: [MailLabel]?           // set = only mail with one of these labels, from any folder
+    // Chat filters.
+    var mutedChatsList: [ChatRef]?             // these spaces / chats never notify
+    var mutedChatKeywordsList: [String]?       // whole words in chat name, message or sender: never notify
 
     var mutedSenders: [String] {
         get { mutedSendersList ?? [] }
@@ -130,6 +133,14 @@ struct AccountConfig: Identifiable, Codable, Equatable {
     var mutedKeywords: [String] {
         get { mutedKeywordsList ?? [] }
         set { mutedKeywordsList = newValue.isEmpty ? nil : newValue }
+    }
+    var mutedChats: [ChatRef] {
+        get { mutedChatsList ?? [] }
+        set { mutedChatsList = newValue.isEmpty ? nil : newValue }
+    }
+    var mutedChatKeywords: [String] {
+        get { mutedChatKeywordsList ?? [] }
+        set { mutedChatKeywordsList = newValue.isEmpty ? nil : newValue }
     }
     var onlyLabels: [MailLabel] {
         get { onlyLabelsList ?? [] }

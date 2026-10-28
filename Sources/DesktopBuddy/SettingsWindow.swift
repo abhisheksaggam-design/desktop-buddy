@@ -299,6 +299,9 @@ struct AccountDetailView: View {
             if a.watchMail {
                 MailFilterSections(account: binding)
             }
+            if a.watchChat {
+                ChatMuteSection(account: binding)
+            }
 
             // Appearance
             Section("Appearance") {

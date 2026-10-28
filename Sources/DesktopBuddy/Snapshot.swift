@@ -33,6 +33,15 @@ enum Snapshot {
             render(Form { MailFilterSections(account: account) }.formStyle(.grouped)
                     .background(Color(nsColor: .windowBackgroundColor)),
                    size: NSSize(width: 580, height: 620), to: out.appendingPathComponent("settings-account-mail.png"))
+            var muted = AppState.shared.account(a.id) ?? a
+            muted.mutedChats = [ChatRef(accountID: a.id, chatID: "spaces/A", name: "All hands", kind: .space),
+                                ChatRef(accountID: a.id, chatID: "spaces/B", name: "Social", kind: .space),
+                                ChatRef(accountID: a.id, chatID: "spaces/C", name: "Sam Patel", kind: .direct)]
+            muted.mutedChatKeywords = ["standup", "lunch"]
+            AppState.shared.update(muted)
+            render(Form { ChatMuteSection(account: account) }.formStyle(.grouped)
+                    .background(Color(nsColor: .windowBackgroundColor)),
+                   size: NSSize(width: 580, height: 330), to: out.appendingPathComponent("settings-account-chat-mute.png"))
         }
         render(AddAccountSheet(provider: .microsoft).background(Color(nsColor: .windowBackgroundColor)),
                size: NSSize(width: 520, height: 520), to: out.appendingPathComponent("add-account.png"))

@@ -61,7 +61,8 @@ final class Poller {
         for (source, job) in jobs {
             do {
                 var result = try await job()
-                state.mutedMail.formUnion(MailFilter.apply(&result, account))
+                let muted = MailFilter.apply(&result, account)
+                if result.source == .mail { state.mutedMail.formUnion(muted) }
                 result.items = ClientMatcher.assign(result.items, accountID: account.id)
                 state.reconcile(source: result.source, accountID: account.id, liveIDs: result.liveIDs)
                 state.refreshDetails(result.items)

@@ -82,6 +82,64 @@ struct MailFilterSections: View {
     }
 }
 
+// MARK: - Muted chats (account page)
+
+/// "Mute Chats" section on an account page: spaces / chats and words that never notify.
+struct ChatMuteSection: View {
+    @Binding var account: AccountConfig
+    @ObservedObject var state = AppState.shared
+    @Local private var picking = false
+
+    var body: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    SettingsIcon(symbol: "bell.slash.fill", tint: .gray, size: 20)
+                    Text("Chats")
+                    Spacer()
+                    Button("Choose Chats…") { picking = true }
+                        .controlSize(.small)
+                        .disabled(!state.signedIn.contains(account.id))
+                }
+                if account.mutedChats.isEmpty {
+                    Text("No chats muted.").font(.callout).foregroundStyle(.secondary)
+                } else {
+                    FlowLayout(spacing: 6) {
+                        ForEach(account.mutedChats) { c in
+                            HStack(spacing: 4) {
+                                Image(systemName: c.kind == .direct ? "person.fill" : (c.kind == .group ? "person.2.fill" : "number"))
+                                    .font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
+                                Text(c.name).font(.callout).lineLimit(1)
+                                Button { var x = account; x.mutedChats.removeAll { $0 == c }; account = x } label: {
+                                    Image(systemName: "xmark").font(.system(size: 8, weight: .bold))
+                                }
+                                .buttonStyle(.borderless).foregroundStyle(.secondary)
+                                .accessibilityLabel("Unmute \(c.name)")
+                            }
+                            .padding(.leading, 8).padding(.trailing, 7).frame(height: 24)
+                            .background(Capsule().fill(Color.gray.opacity(0.15)))
+                        }
+                    }
+                }
+            }
+            .padding(.vertical, 4)
+            TokenField(title: "Keywords", prompt: "Type a word, e.g. standup",
+                       hint: "Matched as a whole word in the chat's name, the message or the sender's name.",
+                       tokens: $account.mutedChatKeywords, symbol: "text.badge.xmark", tint: .gray,
+                       validate: TokenField.keywordProblem)
+        } header: {
+            Text("Mute Chats")
+        } footer: {
+            Footnote("Messages in muted chats never pop up, even for a client. They stay unread in \(account.provider.chatName), so you can still find them there.")
+        }
+        .sheet(isPresented: $picking) {
+            ChatPickerSheet(selected: account.mutedChats, clientName: "", title: "Mute Chats", accountID: account.id) { picked in
+                var x = account; x.mutedChats = picked; account = x
+            }
+        }
+    }
+}
+
 /// Popover listing the account's Gmail labels or recent Outlook categories, with search.
 private struct LabelPicker: View {
     let account: AccountConfig

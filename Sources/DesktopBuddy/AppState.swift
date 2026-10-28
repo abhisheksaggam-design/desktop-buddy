@@ -138,8 +138,9 @@ final class AppState: ObservableObject {
         guard let i = config.accounts.firstIndex(where: { $0.id == a.id }) else { return }
         let old = config.accounts[i]
         config.accounts[i] = a
-        if old.mutedSenders != a.mutedSenders || old.mutedKeywords != a.mutedKeywords || old.onlyLabelsList != a.onlyLabelsList {
-            // Rules changed: muted mail may now be wanted (forget the cache), and newly muted mail leaves at once.
+        if old.mutedSenders != a.mutedSenders || old.mutedKeywords != a.mutedKeywords || old.onlyLabelsList != a.onlyLabelsList
+            || old.mutedChatsList != a.mutedChatsList || old.mutedChatKeywords != a.mutedChatKeywords {
+            // Rules changed: muted mail or chats may now be wanted (forget the cache), and newly muted mail leaves at once.
             mutedMail = mutedMail.filter { !$0.hasPrefix("mail:\(a.id):") }
             let before = items.count
             items.removeAll { $0.accountID == a.id && MailFilter.isMuted($0, a) }

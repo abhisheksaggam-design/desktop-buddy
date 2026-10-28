@@ -180,7 +180,7 @@ enum ClientMatcher {
         return r.contains("@") ? addr == r : (addr.hasSuffix("@" + r) || addr.hasSuffix("." + r))
     }
 
-    /// What keywords are looked for in: subject, preview and sender name.
+    /// What keywords are looked for in: subject or chat name, preview or message, and sender name.
     static func mailText(_ item: BuddyItem) -> String {
         item.title + " " + (item.detail ?? "") + " " + (item.from ?? "")
     }
@@ -194,20 +194,27 @@ enum ClientMatcher {
     }
 }
 
-// MARK: - Muted mail
+// MARK: - Muted mail and chats
 
-/// An account's mute rules: mail from these senders, or with these words, never pops up.
+/// An account's mute rules: mail from these senders or with these words, and chats picked or with these words, never pop up.
 enum MailFilter {
     static func isMuted(_ item: BuddyItem, _ account: AccountConfig) -> Bool {
-        guard item.source == .mail else { return false }
-        return account.mutedSenders.contains { ClientMatcher.senderMatches($0, item) }
-            || account.mutedKeywords.contains { ClientMatcher.containsWord($0, in: ClientMatcher.mailText(item)) }
+        switch item.source {
+        case .mail:
+            return account.mutedSenders.contains { ClientMatcher.senderMatches($0, item) }
+                || account.mutedKeywords.contains { ClientMatcher.containsWord($0, in: ClientMatcher.mailText(item)) }
+        case .chat:
+            if let ref = item.chatRef, account.mutedChats.contains(where: { $0.chatID == ref }) { return true }
+            return account.mutedChatKeywords.contains { ClientMatcher.containsWord($0, in: ClientMatcher.mailText(item)) }
+        default:
+            return false
+        }
     }
 
-    /// Drops muted mail from a fetch, including from the live IDs, so muted mail already on screen clears too.
+    /// Drops muted mail or chats from a fetch, including from the live IDs, so muted ones already on screen clear too.
     /// Returns the IDs dropped.
     static func apply(_ result: inout FetchResult, _ account: AccountConfig) -> Set<String> {
-        guard result.source == .mail else { return [] }
+        guard result.source == .mail || result.source == .chat else { return [] }
         let muted = Set(result.items.filter { isMuted($0, account) }.map(\.id))
         guard !muted.isEmpty else { return [] }
         result.items.removeAll { muted.contains($0.id) }

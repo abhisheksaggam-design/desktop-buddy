@@ -363,6 +363,8 @@ struct FlowLayout: Layout {
 
 struct ChatPickerSheet: View {
     let clientName: String
+    var title: String? = nil            // defaults to "Chats for <client>"
+    var accountID: String? = nil        // only this account's chats
     let onDone: ([ChatRef]) -> Void
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var state = AppState.shared
@@ -374,8 +376,11 @@ struct ChatPickerSheet: View {
     @Local private var namesDone = 0
     @Local private var namesTotal = 0
 
-    init(selected: [ChatRef], clientName: String, onDone: @escaping ([ChatRef]) -> Void) {
+    init(selected: [ChatRef], clientName: String, title: String? = nil, accountID: String? = nil,
+         onDone: @escaping ([ChatRef]) -> Void) {
         self.clientName = clientName
+        self.title = title
+        self.accountID = accountID
         self.onDone = onDone
         _picked = Local(wrappedValue: Set(selected))
     }
@@ -384,7 +389,7 @@ struct ChatPickerSheet: View {
         VStack(spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Chats for \(clientName)").font(.title3.weight(.semibold))
+                    Text(title ?? "Chats for \(clientName)").font(.title3.weight(.semibold))
                     Text("Google Chat spaces and Teams chats you're in").font(.callout).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -485,7 +490,7 @@ struct ChatPickerSheet: View {
     }
 
     private func load() async {
-        for a in state.config.accounts where a.enabled && state.signedIn.contains(a.id) {
+        for a in state.config.accounts where a.enabled && state.signedIn.contains(a.id) && (accountID == nil || a.id == accountID) {
             do {
                 all += try await ChatDirectory.list(a) { done, total in namesDone = done; namesTotal = total }
             }
