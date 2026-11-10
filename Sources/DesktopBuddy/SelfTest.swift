@@ -19,6 +19,9 @@ enum SelfTest {
         Keychain.disabled = true
         clientRules()
         mailFilters()
+        glimpse()
+        feedback()
+        undoClear()
         labelQueries()
         sounds()
         tour()
@@ -227,25 +230,97 @@ enum SelfTest {
         begin("Muted chats")
         var h = s.config.accounts[0]
         h.mutedChats = [ChatRef(accountID: h.id, chatID: "spaces/LOUD", name: "All hands")]
-        h.mutedChatKeywords = ["standup"]
-        check("mail mute rules don't touch chats", !MailFilter.isMuted(chat("c1", account: h.id, space: "newsletter", ref: "s"), g))
+        h.mutedKeywords = ["standup"]
+        check("mail senders don't mute chats", !MailFilter.isMuted(chat("c1", account: h.id, space: "Hello", ref: "s"), g))
         check("a muted chat is muted", MailFilter.isMuted(chat("c2", account: h.id, space: "All hands", ref: "spaces/LOUD"), h))
         check("other chats are not", !MailFilter.isMuted(chat("c3", account: h.id, space: "Design", ref: "spaces/QUIET"), h))
         check("chat keyword in the message", MailFilter.isMuted(chat("c4", account: h.id, space: "Design", ref: "x", text: "Standup in 5"), h))
         check("chat keyword in the chat name", MailFilter.isMuted(chat("c5", account: h.id, space: "Daily standup", ref: "y"), h))
         check("chat keyword is a whole word", !MailFilter.isMuted(chat("c6", account: h.id, space: "Design", ref: "z", text: "standups"), h))
-        check("chat keywords don't mute mail", !MailFilter.isMuted(mail("c7", account: h.id, address: "a@b.com", subject: "standup"), h))
+        check("one keyword list mutes mail too", MailFilter.isMuted(mail("c7", account: h.id, address: "a@b.com", subject: "standup"), h))
         check("old settings have no chat mutes", AccountConfig(label: "x", email: "").mutedChats.isEmpty)
         let loud = chat("c8", account: h.id, space: "All hands", ref: "spaces/LOUD")
         let calm = chat("c9", account: h.id, space: "Design", ref: "spaces/QUIET")
         var cr = FetchResult(source: .chat, items: [loud, calm], liveIDs: [loud.id, calm.id])
         _ = MailFilter.apply(&cr, h)
         check("chat fetch drops muted chats", cr.items.map(\.id) == [calm.id] && !cr.liveIDs.contains(loud.id))
-        var plain = h; plain.mutedChats = []; plain.mutedChatKeywords = []
+        var plain = h; plain.mutedChats = []; plain.mutedKeywords = []
         s.update(plain)
         s.offer([loud, calm])
         s.update(h)
         check("muting a chat clears it at once", !s.items.contains { $0.id == loud.id } && s.items.contains { $0.id == calm.id })
+    }
+
+    private static func undoClear() {
+        begin("Undo after Done and Clear")
+        let s = freshState()
+        let a = mail("u1", account: "acc-g", address: "a@b.com", subject: "One", date: Date())
+        let b = mail("u2", account: "acc-g", address: "a@b.com", subject: "Two", date: Date().addingTimeInterval(-60))
+        _ = s.offer([a, b])
+        s.clearAll()
+        check("Clear All empties the list", s.items.isEmpty)
+        check("…and offers Undo for both", s.undo?.items.count == 2 && s.undo?.label == "2 removed")
+        s.undoLast()
+        check("Undo puts them back, newest first", s.items.map(\.id) == [a.id, b.id] && s.undo == nil)
+        s.done(a.id)
+        check("Done offers Undo for one", s.undo?.label == "1 removed" && s.items.map(\.id) == [b.id])
+        s.undoLast()
+        check("Undo after Done brings it back", s.items.contains { $0.id == a.id })
+        s.dismiss(b.id)
+        check("removals by syncing don't offer Undo", s.undo == nil)
+        s.expanded = true
+        s.clearAll()
+        check("the list stays open while Undo is offered", s.expanded)
+        s.undoLast()
+    }
+
+    private static func feedback() {
+        begin("Report a bug")
+        var r = FeedbackReport()
+        check("an empty report can't be sent", !r.isReady)
+        r.message = "The logo didn't update after renaming a client.\nSecond line"
+        check("a written report can be sent", r.isReady)
+        check("subject says what kind and starts with the first line",
+              FeedbackSender.subject(r) == "Desktop Buddy Bug: The logo didn't update after renaming a client.")
+        r.kind = .idea
+        r.message = String(repeating: "a", count: 100)
+        check("long subjects are shortened", FeedbackSender.subject(r).count < 90 && FeedbackSender.subject(r).hasSuffix("…"))
+        r.replyTo = "not an email"
+        check("a bad reply address is caught", !r.replyIsValid)
+        r.replyTo = "jo@client.com"
+        let p = FeedbackSender.payload(r)
+        check("the service gets the subject, message and reply address",
+              (p["_subject"] as? String ?? "").hasPrefix("Desktop Buddy Idea") && (p["message"] as? String ?? "").contains("aaaa") && p["email"] as? String == "jo@client.com")
+        check("the form address is built from the form ID", FeedbackSender.endpoint("abcd1234")?.absoluteString == "https://formspree.io/f/abcd1234")
+        check("app and macOS version are added when allowed", FeedbackSender.body(r).contains("macOS"))
+        r.includeDetails = false
+        check("…and left out when not", !FeedbackSender.body(r).contains("macOS"))
+        check("notifications are never included", !FeedbackSender.body(r).contains("Contract"))
+    }
+
+    private static func glimpse() {
+        begin("Menu bar pop-up")
+        let screen = NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let visible = NSRect(x: 0, y: 0, width: 1440, height: 875)   // 25pt menu bar
+        let f = GlimpsePlacement.frame(screen: screen, visible: visible)
+        let card = f.insetBy(dx: GlimpsePlacement.margin, dy: GlimpsePlacement.margin)
+        check("centred at the top of the screen", abs(card.midX - screen.midX) < 0.5)
+        check("just below the menu bar", abs(card.maxY - (visible.maxY - GlimpsePlacement.gap)) < 0.5)
+        check("fully on screen", screen.contains(card))
+
+        let old = mail("g1", account: "a", address: "a@b.com", subject: "Old")
+        let new = mail("g2", account: "a", address: "a@b.com", subject: "New")
+        check("only new arrivals pop up", GlimpsePlacement.arrivals(previous: [old.id], now: [new, old]).map(\.id) == [new.id])
+        check("nothing new, no pop-up", GlimpsePlacement.arrivals(previous: [old.id, new.id], now: [new, old]).isEmpty)
+        check("no pop-up while paused", !GlimpsePlacement.shouldShow(paused: true, quiet: false))
+        check("no pop-up in quiet hours", !GlimpsePlacement.shouldShow(paused: false, quiet: true))
+        check("pop-up otherwise", GlimpsePlacement.shouldShow(paused: false, quiet: false))
+        check("shows for 10 seconds", GlimpseController.showSeconds == 10)
+        let t0 = Date(timeIntervalSince1970: 1000)
+        check("hovering freezes the time left", GlimpsePlacement.timeLeft(deadline: t0.addingTimeInterval(6.5), now: t0) == 6.5)
+        check("time left never goes below zero", GlimpsePlacement.timeLeft(deadline: t0, now: t0.addingTimeInterval(3)) == 0)
+        check("a moment to move away after reading", GlimpsePlacement.minimumAfterHover >= 2)
+        check("View more sits under the card", GlimpsePlacement.canvas.height > GlimpsePlacement.card.height + GlimpsePlacement.viewMore.height)
     }
 
     private static func labelQueries() {
@@ -305,24 +380,51 @@ enum SelfTest {
     }
 
     private static func placement() {
-        begin("Logos: main display, screen sharing")
-        let main = NSRect(x: 0, y: 80, width: 1440, height: 820)       // visible frame above a Dock
-        let size = NSSize(width: 200, height: 120)
-        let f = OverlayPlacement.frame(size: size, offset: OverlayPlacement.defaultOffset, in: main)
-        check("default sits in the bottom-right corner", f.maxX == 1416 && f.minY == 104)
-        let far = OverlayPlacement.frame(size: size, offset: CGSize(width: -900, height: 24), in: main)
-        check("dragged onto a screen to the right → back on the main display", far.maxX == main.maxX)
-        let left = OverlayPlacement.frame(size: size, offset: CGSize(width: 5000, height: 24), in: main)
-        check("dragged off the left → stays fully on screen", left.minX == main.minX)
-        let up = OverlayPlacement.frame(size: size, offset: CGSize(width: 24, height: 5000), in: main)
-        check("never goes under the menu bar", up.maxY == main.maxY)
-        let down = OverlayPlacement.frame(size: size, offset: CGSize(width: 24, height: -300), in: main)
-        check("never goes under the Dock", down.minY == main.minY)
-        let smaller = NSRect(x: 0, y: 0, width: 1280, height: 800)
-        let moved = OverlayPlacement.frame(size: size, offset: CGSize(width: 40, height: 60), in: smaller)
-        check("keeps its spot from the corner when the display changes", moved.maxX == 1240 && moved.minY == 60)
-        let p = NSPoint(x: 1300, y: 200)
-        check("offset round-trips", OverlayPlacement.frame(size: size, offset: OverlayPlacement.offset(of: p, in: main), in: main).maxX == 1300)
+        begin("On-screen bar: places, list, screen sharing")
+        let main = NSRect(x: 0, y: 80, width: 1440, height: 790)       // visible frame above a Dock
+        check("six corner places: two per corner area, none in the middle of an edge",
+              DockSpot.allCases.count == 6 && [DockSpot.Edge.bottom, .left, .right].allSatisfy { e in DockSpot.allCases.filter { $0.edge == e }.count == 2 })
+        check("default is the bottom right corner", AppConfig().dockSpot == .bottomRight)
+        check("logos start at their usual size", AppConfig().dockScale == 1 && DockPlacement.item(scale: 1) == DockPlacement.item)
+        check("the size setting makes logos bigger", DockPlacement.item(scale: 1.6) == 48)
+        check("…within limits", DockPlacement.item(scale: 5) == 48 && DockPlacement.item(scale: 0.1) == 24)
+        check("the biggest logos and their label still fit the canvas",
+              DockPlacement.canvasSize(vertical: false).height >= 6 + 4 + 48 + 4 + 10 + 30 + 6)
+        check("an old middle place moves to the nearest corner", DockSpot.saved("rightMiddle") == .rightBottom && DockSpot.saved("bottomCenter") == .bottomRight)
+        check("settings without a place still load", DockSpot.saved(nil) == .bottomRight)
+        let zones = DockSpot.allCases.map { DockPlacement.zone($0, in: main) }
+        check("places don't overlap each other",
+              zones.indices.allSatisfy { a in zones.indices.allSatisfy { b in a == b || !zones[a].intersects(zones[b]) } })
+        check("every place is fully on screen", zones.allSatisfy { main.contains($0) })
+        // Bars like Wispr Flow's sit in the middle of the bottom, left or right edge.
+        let middleBars = [NSRect(x: main.midX - 80, y: main.minY, width: 160, height: 56),
+                          NSRect(x: main.minX, y: main.midY - 80, width: 56, height: 160),
+                          NSRect(x: main.maxX - 56, y: main.midY - 80, width: 56, height: 160)]
+        check("no place covers the middle of an edge", zones.allSatisfy { z in middleBars.allSatisfy { !z.intersects($0) } })
+        let br = DockPlacement.canvas(.bottomRight, in: main)
+        check("bottom right sits on the bottom, near the right", br.minY == main.minY + DockPlacement.edgeInset && br.maxX == main.maxX - DockPlacement.cornerInset)
+        let lt = DockPlacement.canvas(.leftTop, in: main)
+        check("left top hugs the left edge near the top", lt.minX == main.minX + DockPlacement.edgeInset && lt.maxY < main.maxY)
+        check("dragging near the bottom right picks bottom right",
+              DockPlacement.nearest(to: NSPoint(x: main.maxX - 200, y: main.minY + 30), in: main) == .bottomRight)
+        let aims: [(NSPoint, DockSpot)] = [
+            (NSPoint(x: main.maxX - 30, y: main.maxY - 60), .rightTop), (NSPoint(x: main.minX + 30, y: main.maxY - 60), .leftTop),
+            (NSPoint(x: main.maxX - 30, y: main.minY + 170), .rightBottom), (NSPoint(x: main.minX + 30, y: main.minY + 170), .leftBottom),
+            (NSPoint(x: main.maxX - 170, y: main.minY + 20), .bottomRight), (NSPoint(x: main.minX + 170, y: main.minY + 20), .bottomLeft)]
+        check("pointing at any corner place picks it, from anywhere",
+              aims.allSatisfy { DockPlacement.nearest(to: $0.0, in: main) == $0.1 })
+        let tall = NSRect(x: 1300, y: 700, width: 420, height: 720)
+        check("the logos' panel can be dragged up past the menu bar",
+              FreePanel(contentRect: .zero, styleMask: .borderless, backing: .buffered, defer: true)
+                .constrainFrameRect(tall, to: NSScreen.main) == tall)
+        check("dragging up the left side picks left side, top",
+              DockPlacement.nearest(to: NSPoint(x: main.minX + 40, y: main.maxY - 120), in: main) == .leftTop)
+        let bar = NSRect(x: main.maxX - 66, y: main.minY + 96, width: 50, height: 200)
+        let list = DockPlacement.list(beside: bar, .rightBottom, in: main)
+        check("the list opens beside the bar, into the screen", list.maxX < bar.minX && list.size == DockPlacement.listSize)
+        let low = DockPlacement.list(beside: NSRect(x: 1100, y: main.minY + 10, width: 230, height: 62), .bottomRight, in: main)
+        check("from the bottom it opens above the bar, lined up with it", low.minY > main.minY + 72 && low.maxX == 1330 && main.contains(low))
+        check("the list has a fixed size that fits about four", DockPlacement.listSize.height >= 4 * 90)
 
         let order = ["gatehouse", "riskhawk", "dynamatix", "reminders"]
         check("first logos follow the usual order",
@@ -333,12 +435,6 @@ enum SelfTest {
         check("a logo leaving doesn't reorder the rest",
               AppState.slots(previous: ["reminders", "gatehouse", "riskhawk"], present: ["reminders", "riskhawk"], defaultOrder: order)
                 == ["reminders", "riskhawk"])
-        let canvas = OverlayPlacement.canvasFrame(content: NSSize(width: 200, height: 110), offset: OverlayPlacement.defaultOffset, in: main)
-        check("canvas keeps the logos in the bottom-right corner", canvas.maxX == 1416 && canvas.minY == 104)
-        let bigger = OverlayPlacement.canvasFrame(content: NSSize(width: 320, height: 260), offset: OverlayPlacement.defaultOffset, in: main)
-        check("a bubble appearing doesn't move or resize the canvas", bigger == canvas)
-        let wide = OverlayPlacement.canvasFrame(content: NSSize(width: 700, height: 110), offset: OverlayPlacement.defaultOffset, in: main)
-        check("canvas grows only when the logos outgrow it", wide.width == 700 && wide.maxX == canvas.maxX)
         let now = Date()
         check("hidden from sharing by default", AppConfig().hidesFromSharing
               && OverlayPlacement.sharingHidden(protection: true, allowedUntil: nil, now: now))
@@ -376,7 +472,7 @@ enum SelfTest {
         check("…without touching other accounts", s.items.contains { $0.id == other.id })
         s.clearAll(owner: "acc-m")
         check("Clear on one account only clears that account", s.items.isEmpty)
-        check("list closes when nothing is left", s.expanded == false)
+        check("an empty list stays open only while Undo is offered", s.expanded == (s.undo != nil))
     }
 
     private static func serviceSwitches() {

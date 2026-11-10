@@ -13,6 +13,8 @@ enum Main {
             Task { @MainActor in exit(await SelfTest.run()) }
             dispatchMain()
         }
+        // A throwaway data folder (testing) never reads or writes your real sign-ins.
+        if ProcessInfo.processInfo.environment["DESKTOPBUDDY_HOME"] != nil { Keychain.disabled = true }
         let app = NSApplication.shared
         let delegate = AppDelegate()
         app.delegate = delegate
@@ -50,6 +52,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             checkForUpdates: { [weak self] in
                 self?.popover.performClose(nil)
                 self?.checkForUpdates()
+            },
+            reportBug: { [weak self] in
+                self?.popover.performClose(nil)
+                self?.reportBug()
             }))
         TourController.shared.onClose = { [weak self] addAccount in
             if addAccount || AppState.shared.config.accounts.isEmpty {
@@ -66,8 +72,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             .sink { [weak self] items, paused in self?.updateIcon(count: items.count, paused: paused) }
             .store(in: &bag)
 
-        _ = OverlayController.shared
-        OverlayController.shared.update()
+        // New notifications drop down at the top centre of the screen.
+        GlimpseController.shared.viewMore = { [weak self] in self?.showList() }
+        DockController.shared.update()
         Poller.shared.start()
         UpdateChecker.shared.start()
 
@@ -84,20 +91,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if ProcessInfo.processInfo.environment["DESKTOPBUDDY_HOME"] != nil {
             DistributedNotificationCenter.default().addObserver(forName: Notification.Name("DesktopBuddy.test.status"),
                                                                 object: nil, queue: .main) { _ in
-                MainActor.assumeIsolated { OverlayController.shared.printStatus() }
+                MainActor.assumeIsolated { GlimpseController.shared.printStatus(); DockController.shared.printStatus() }
             }
             DistributedNotificationCenter.default().addObserver(forName: Notification.Name("DesktopBuddy.test.send"),
                                                                 object: nil, queue: .main) { note in
                 let owner = note.object as? String
                 MainActor.assumeIsolated {
-                    AppState.shared.offer([BuddyItem(id: "test:\(UUID().uuidString)", source: .chat, accountID: "x",
-                                                     title: "Test message", from: "Tester", detail: "Checking the animation",
-                                                     date: Date(), url: nil, clientID: owner)])
+                    let state = AppState.shared
+                    let account = state.config.accounts.first { $0.id == owner } ?? state.config.accounts.first
+                    let client = state.config.clients.first { $0.id == owner }?.id
+                    state.offer([BuddyItem(id: "test:\(UUID().uuidString)", source: .chat, accountID: account?.id ?? "x",
+                                           title: "Project Apollo", from: "Priya Shah",
+                                           detail: "Can you review the new pricing page before the 3pm call?",
+                                           date: Date(), url: nil, clientID: client)])
                 }
             }
         }
         if CommandLine.arguments.contains("--demo") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { Self.sendTestItems() }
+            // Test hook: report the pop-up while it's open and after it should have gone.
+            if ProcessInfo.processInfo.environment["DESKTOPBUDDY_HOME"] != nil {
+                for t in [1.1, 1.8, 6.0, 11.5, 12.5] {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + t) { print("t=\(t)", terminator: " "); GlimpseController.shared.printStatus(); DockController.shared.printStatus() }
+                }
+            }
             return
         }
         AppState.shared.purgeDemoItems()
@@ -130,6 +147,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             menu.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: ",").target = self
             menu.addItem(withTitle: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "").target = self
             menu.addItem(withTitle: "Show Tour", action: #selector(showTour), keyEquivalent: "").target = self
+            if FeedbackSender.isSetUp {
+                menu.addItem(withTitle: "Report a Bug or Idea…", action: #selector(reportBug), keyEquivalent: "").target = self
+            }
             if AppState.shared.config.hidesFromSharing {
                 menu.addItem(withTitle: "Allow Screenshots for 1 Minute", action: #selector(allowScreenshots), keyEquivalent: "").target = self
             }
@@ -148,9 +168,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
+    /// Opens the menu bar list (from the pop-up's "View more").
+    func showList() {
+        guard let button = statusItem.button, !popover.isShown else { return }
+        NSApp.activate()
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        popover.contentViewController?.view.window?.makeKey()
+    }
+
+    @objc func reportBug() { FeedbackController.shared.show() }
+
     @objc private func togglePause() { AppState.shared.config.paused.toggle() }
 
-    @objc func allowScreenshots() { OverlayController.shared.allowScreenshots() }
+    @objc func allowScreenshots() { DockController.shared.allowScreenshots() }
 
     /// Welcome tour window.
     @objc func showTour() {
@@ -255,6 +285,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let app = NSMenu()
         app.addItem(withTitle: "About Desktop Buddy", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         app.addItem(withTitle: "Check for Updates…", action: #selector(AppDelegate.checkForUpdates), keyEquivalent: "").target = target
+        if FeedbackSender.isSetUp {
+            app.addItem(withTitle: "Report a Bug or Idea…", action: #selector(AppDelegate.reportBug), keyEquivalent: "").target = target
+        }
         app.addItem(.separator())
         app.addItem(withTitle: "Settings…", action: #selector(AppDelegate.openSettings), keyEquivalent: ",").target = target
         app.addItem(.separator())

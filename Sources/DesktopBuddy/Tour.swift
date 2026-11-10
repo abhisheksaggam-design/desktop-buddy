@@ -135,17 +135,15 @@ struct TourView: View {
                 Label("Right-click it for quick options.", systemImage: "cursorarrow.click.2")
             }
         case .logos:
-            TourPageLayout(title: "Logos on your screen",
-                           text: "Each account or client gets its own logo in the corner of your screen. Click one to see what's waiting from them.") {
-                HStack(spacing: -14) {
-                    ForEach(Array(sampleOwners.enumerated()), id: \.offset) { i, o in
-                        LogoTile(url: Logos.bundledURL(o.0), name: o.1, tint: o.2, size: 72)
-                            .shadow(color: .black.opacity(0.18), radius: 8, y: 4)
-                            .zIndex(Double(sampleOwners.count - i))
-                    }
-                }
+            TourPageLayout(title: "New things drop in at the top",
+                           text: "When something arrives, it drops down at the top centre of your screen for 10 seconds, with who it's from and what it says. Click it to open it.") {
+                GlimpseView(model: .sample, actions: GlimpseActions(open: {}, done: {}, close: {}, viewMore: {}))
+                    .allowsHitTesting(false)
             } footnote: {
-                Label("Drag a logo anywhere. It stays where you put it.", systemImage: "hand.draw")
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("Logos in the corner show who's waiting. Click one for its list, or drag it to another corner.", systemImage: "hand.draw")
+                    Label("Missed it? Everything waiting stays in the menu bar dropdown.", systemImage: "tray.full")
+                }
             }
         case .filters:
             TourPageLayout(title: "Only what matters", text: "Tell Desktop Buddy what to call out and what to ignore, in Settings.") {
@@ -174,10 +172,6 @@ struct TourView: View {
                 Label("Change them any time in Settings → General.", systemImage: "gearshape")
             }
         }
-    }
-
-    private var sampleOwners: [(String, String, Color)] {
-        [("dynamatix", "Dynamatix", .blue), ("gatehouse", "Gatehouse", .green), ("riskhawk", "RiskHawk", .orange)]
     }
 }
 

@@ -299,8 +299,8 @@ struct AccountDetailView: View {
             if a.watchMail {
                 MailFilterSections(account: binding)
             }
-            if a.watchChat {
-                ChatMuteSection(account: binding)
+            if a.watchMail || a.watchChat {
+                MuteSection(account: binding)
             }
 
             // Appearance
@@ -805,22 +805,27 @@ private struct AppearancePane: View {
             } header: {
                 Text("Logos")
             } footer: {
-                Footnote("Each account and client shows its own logo on screen, so you know who a notification is for at a glance. A square PNG works best.")
+                Footnote("Each account and client shows its own logo on its notifications, so you know who a notification is for at a glance. A square PNG works best.")
             }
 
-            Section("Size") {
-                HStack {
-                    Image(systemName: "app").font(.caption)
-                    Slider(value: $state.config.characterScale, in: 0.5...1.2)
-                    Image(systemName: "app").font(.title3)
-                    Text("\(Int(state.config.characterScale * 100))%").monospacedDigit().frame(width: 44, alignment: .trailing)
+            Section {
+                Picker("Position", selection: $state.config.dockSpot) {
+                    ForEach(DockSpot.allCases) { Text($0.name).tag($0) }
                 }
-                LabeledContent("Position") {
-                    Button("Move Back to Corner") { OverlayController.shared.resetPosition() }
+                LabeledContent("Size") {
+                    HStack(spacing: 8) {
+                        Image(systemName: "circle.fill").font(.system(size: 8)).foregroundStyle(.secondary)
+                        Slider(value: $state.config.dockScale, in: DockPlacement.scaleRange, step: 0.1)
+                            .frame(width: 180)
+                            .accessibilityLabel("Logo size")
+                        Image(systemName: "circle.fill").font(.system(size: 15)).foregroundStyle(.secondary)
+                        Text("\(Int((state.config.dockScale * 100).rounded()))%").monospacedDigit().frame(width: 44, alignment: .trailing)
+                    }
                 }
-                LabeledContent("Preview") {
-                    Button("Show Sample Notifications") { AppDelegate.sendTestItems() }
-                }
+            } header: {
+                Text("On Screen")
+            } footer: {
+                Footnote("Each account shows its logo with how many are waiting. Hover a logo for its arrow and click to see what's waiting. Drag a logo to any corner: the places it can go light up. The middle of each edge stays free for bars like Wispr Flow's.")
             }
 
             Section {
@@ -830,14 +835,14 @@ private struct AppearancePane: View {
                         if let until = state.screenshotsAllowedUntil, until > Date() {
                             Label("Allowed for a minute", systemImage: "camera").foregroundStyle(.secondary)
                         } else {
-                            Button("Allow for 1 Minute") { OverlayController.shared.allowScreenshots() }
+                            Button("Allow for 1 Minute") { DockController.shared.allowScreenshots() }
                         }
                     }
                 }
             } header: {
                 Text("Privacy on Screen")
             } footer: {
-                Footnote("The logos always stay on your main display (the one with the menu bar) and always show on your screen, calls included. While “Hide from Screen Sharing” is on, people you share your screen with don't see them. macOS uses the same switch for screenshots, so to take one, allow screenshots for a minute (also in the menu bar •••).")
+                Footnote("The pop-up always shows on your screen, calls included. While “Hide from Screen Sharing” is on, people you share your screen with don't see it. macOS uses the same switch for screenshots, so to take one, allow screenshots for a minute (also in the menu bar •••).")
             }
         }
         .formStyle(.grouped)

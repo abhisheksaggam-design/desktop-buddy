@@ -31,6 +31,10 @@ final class AppState: ObservableObject {
     @Published var expanded = false
     @Published var filterOwner: String?             // nil = show every owner in the list
     @Published var lastArrival: BuddyItem?          // drives the speech bubble
+    /// What the last Done / Clear removed, for a few seconds, so it can be put back.
+    @Published private(set) var undo: UndoClear?
+    /// True after Tab/arrow keys and false again on mouse use, so rows only look selected while you use the keyboard.
+    @Published var usingKeyboard = false
     @Published var serviceStatus: [String: ServiceStatus] = [:]   // "<accountID>.<source>"
     @Published var signedIn: Set<String> = []                     // account IDs with a saved sign-in
     @Published var checking: Set<String> = []                     // account IDs being checked right now
@@ -138,7 +142,7 @@ final class AppState: ObservableObject {
         let old = config.accounts[i]
         config.accounts[i] = a
         if old.mutedSenders != a.mutedSenders || old.mutedKeywords != a.mutedKeywords || old.onlyLabelsList != a.onlyLabelsList
-            || old.mutedChatsList != a.mutedChatsList || old.mutedChatKeywords != a.mutedChatKeywords {
+            || old.mutedChatsList != a.mutedChatsList {
             // Rules changed: muted mail or chats may now be wanted (forget the cache), and newly muted mail leaves at once.
             mutedMail = mutedMail.filter { !$0.hasPrefix("mail:\(a.id):") }
             let before = items.count
@@ -223,8 +227,39 @@ final class AppState: ObservableObject {
     }
 
     func clearAll(owner: String? = nil) {
+        remember(items.filter { owner == nil || $0.owner == owner })
         if let owner { items.removeAll { $0.owner == owner } } else { items.removeAll() }
         tidyAfterRemoval()
+    }
+
+    /// Done on one or more notifications (from you, not from syncing): removed, with Undo for a few seconds.
+    func done(_ ids: [String]) {
+        let set = Set(ids)
+        remember(items.filter { set.contains($0.id) })
+        items.removeAll { set.contains($0.id) }
+        tidyAfterRemoval()
+    }
+    func done(_ id: String) { done([id]) }
+
+    static let undoSeconds: TimeInterval = 6
+
+    private func remember(_ removed: [BuddyItem]) {
+        guard !removed.isEmpty else { return }
+        let u = UndoClear(items: removed)
+        undo = u
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.undoSeconds) { [weak self] in
+            guard let self, self.undo?.id == u.id else { return }
+            self.undo = nil
+            if self.items.isEmpty { self.expanded = false }
+        }
+    }
+
+    /// Puts back what the last Done / Clear removed (skipping anything that has come back on its own).
+    func undoLast() {
+        guard let u = undo else { return }
+        undo = nil
+        let present = Set(items.map(\.id))
+        items = (items + u.items.filter { !present.contains($0.id) }).sorted { $0.date > $1.date }
     }
 
     func open(_ item: BuddyItem) {
@@ -316,7 +351,13 @@ final class AppState: ObservableObject {
         if let last = lastArrival, !items.contains(where: { $0.id == last.id }) {
             lastArrival = nil
         }
-        if items.isEmpty { expanded = false }
+        if items.isEmpty && undo == nil { expanded = false }      // stays open briefly so Undo is reachable
         if let f = filterOwner, !items.contains(where: { $0.owner == f }) { filterOwner = nil }
     }
+}
+
+struct UndoClear: Equatable {
+    let id = UUID()
+    let items: [BuddyItem]
+    var label: String { items.count == 1 ? "1 removed" : "\(items.count) removed" }
 }

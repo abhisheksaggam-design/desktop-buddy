@@ -205,7 +205,7 @@ enum MailFilter {
                 || account.mutedKeywords.contains { ClientMatcher.containsWord($0, in: ClientMatcher.mailText(item)) }
         case .chat:
             if let ref = item.chatRef, account.mutedChats.contains(where: { $0.chatID == ref }) { return true }
-            return account.mutedChatKeywords.contains { ClientMatcher.containsWord($0, in: ClientMatcher.mailText(item)) }
+            return account.mutedKeywords.contains { ClientMatcher.containsWord($0, in: ClientMatcher.mailText(item)) }
         default:
             return false
         }

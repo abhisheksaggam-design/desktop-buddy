@@ -2,7 +2,7 @@ import SwiftUI
 
 // MARK: - Mail filters (account page)
 
-/// "Mail" and "Mute" sections on an account page: which mail notifies, and what never does.
+/// "Mail" section on an account page: which mail notifies.
 struct MailFilterSections: View {
     @Binding var account: AccountConfig
     @Local private var picking = false
@@ -64,46 +64,71 @@ struct MailFilterSections: View {
                      ? "Only unread mail with one of these \(plural) notifies you, even if a rule moved it out of your inbox."
                      : "Unread mail that arrives in your inbox notifies you. To hear only about mail your rules \(account.provider == .google ? "label" : "categorise"), choose “Only mail with chosen \(plural)”.")
         }
+    }
+}
 
+// MARK: - Mute (account page)
+
+/// One "Mute" section on an account page: senders, chats and keywords that never notify.
+struct MuteSection: View {
+    @Binding var account: AccountConfig
+    @ObservedObject var state = AppState.shared
+    @Local private var picking = false
+
+    private var what: String {
+        switch (account.watchMail, account.watchChat) {
+        case (true, true): return "Muted mail and chats never pop up, even for a client. They stay unread in \(account.provider.mailName) and \(account.provider.chatName), so you can still find them there."
+        case (true, false): return "Muted mail never pops up, even for a client. It stays unread in \(account.provider.mailName), so you can still find it there."
+        default: return "Muted chats never pop up, even for a client. They stay unread in \(account.provider.chatName), so you can still find them there."
+        }
+    }
+
+    private var keywordHint: String {
+        switch (account.watchMail, account.watchChat) {
+        case (true, true): return "Matched as a whole word in a mail's subject, preview or sender, and in a chat's name, message or sender."
+        case (true, false): return "Matched as a whole word in the subject, preview or sender's name."
+        default: return "Matched as a whole word in the chat's name, the message or the sender's name."
+        }
+    }
+
+    var body: some View {
         Section {
-            TokenField(title: "Senders", prompt: "Type a domain or address, e.g. news.example.com",
-                       hint: "A whole domain (example.com) or one address (noreply@example.com). Press Return to add.",
-                       tokens: $account.mutedSenders, symbol: "speaker.slash.fill", tint: .gray,
-                       validate: TokenField.senderProblem)
+            if account.watchMail {
+                TokenField(title: "Senders", prompt: "Type a domain or address, e.g. news.example.com",
+                           hint: "A whole domain (example.com) or one address (noreply@example.com). Press Return to add.",
+                           tokens: $account.mutedSenders, symbol: "speaker.slash.fill", tint: .gray,
+                           validate: TokenField.senderProblem)
+            }
+            if account.watchChat { chats }
             TokenField(title: "Keywords", prompt: "Type a word, e.g. newsletter",
-                       hint: "Matched as a whole word in the subject, preview or sender's name.",
+                       hint: keywordHint,
                        tokens: $account.mutedKeywords, symbol: "text.badge.xmark", tint: .gray,
                        validate: TokenField.keywordProblem)
         } header: {
             Text("Mute")
         } footer: {
-            Footnote("Muted mail never pops up, even for a client. It stays unread in \(account.provider.mailName), so you can still find it there.")
+            Footnote(what)
+        }
+        .sheet(isPresented: $picking) {
+            ChatPickerSheet(selected: account.mutedChats, clientName: "", title: "Mute Chats", accountID: account.id) { picked in
+                var x = account; x.mutedChats = picked; account = x
+            }
         }
     }
-}
 
-// MARK: - Muted chats (account page)
-
-/// "Mute Chats" section on an account page: spaces / chats and words that never notify.
-struct ChatMuteSection: View {
-    @Binding var account: AccountConfig
-    @ObservedObject var state = AppState.shared
-    @Local private var picking = false
-
-    var body: some View {
-        Section {
+    private var chats: some View {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 8) {
                     SettingsIcon(symbol: "bell.slash.fill", tint: .gray, size: 20)
                     Text("Chats")
                     Spacer()
+                    Text(account.mutedChats.isEmpty ? "None yet" : "\(account.mutedChats.count) muted")
+                        .font(.callout).foregroundStyle(.secondary)
                     Button("Choose Chats…") { picking = true }
                         .controlSize(.small)
                         .disabled(!state.signedIn.contains(account.id))
                 }
-                if account.mutedChats.isEmpty {
-                    Text("No chats muted.").font(.callout).foregroundStyle(.secondary)
-                } else {
+                if !account.mutedChats.isEmpty {
                     FlowLayout(spacing: 6) {
                         ForEach(account.mutedChats) { c in
                             HStack(spacing: 4) {
@@ -123,20 +148,6 @@ struct ChatMuteSection: View {
                 }
             }
             .padding(.vertical, 4)
-            TokenField(title: "Keywords", prompt: "Type a word, e.g. standup",
-                       hint: "Matched as a whole word in the chat's name, the message or the sender's name.",
-                       tokens: $account.mutedChatKeywords, symbol: "text.badge.xmark", tint: .gray,
-                       validate: TokenField.keywordProblem)
-        } header: {
-            Text("Mute Chats")
-        } footer: {
-            Footnote("Messages in muted chats never pop up, even for a client. They stay unread in \(account.provider.chatName), so you can still find them there.")
-        }
-        .sheet(isPresented: $picking) {
-            ChatPickerSheet(selected: account.mutedChats, clientName: "", title: "Mute Chats", accountID: account.id) { picked in
-                var x = account; x.mutedChats = picked; account = x
-            }
-        }
     }
 }
 

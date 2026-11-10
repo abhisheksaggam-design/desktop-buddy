@@ -120,11 +120,10 @@ struct AccountConfig: Identifiable, Codable, Equatable {
 
     // Mail filters (optional so older settings files still load).
     var mutedSendersList: [String]?            // "news.example.com" or "noreply@x.com": never notify
-    var mutedKeywordsList: [String]?           // whole words in subject, preview or sender: never notify
+    var mutedKeywordsList: [String]?           // whole words in mail or chats (subject, name, message, sender): never notify
     var onlyLabelsList: [MailLabel]?           // set = only mail with one of these labels, from any folder
     // Chat filters.
     var mutedChatsList: [ChatRef]?             // these spaces / chats never notify
-    var mutedChatKeywordsList: [String]?       // whole words in chat name, message or sender: never notify
 
     var mutedSenders: [String] {
         get { mutedSendersList ?? [] }
@@ -137,10 +136,6 @@ struct AccountConfig: Identifiable, Codable, Equatable {
     var mutedChats: [ChatRef] {
         get { mutedChatsList ?? [] }
         set { mutedChatsList = newValue.isEmpty ? nil : newValue }
-    }
-    var mutedChatKeywords: [String] {
-        get { mutedChatKeywordsList ?? [] }
-        set { mutedChatKeywordsList = newValue.isEmpty ? nil : newValue }
     }
     var onlyLabels: [MailLabel] {
         get { onlyLabelsList ?? [] }
@@ -228,10 +223,15 @@ struct AppConfig: Codable, Equatable {
     }
     var reminderLogoPath: String?
     var seededClients: Bool?
-    var characterScaleChoice: Double?               // on-screen logo size, 0.5 ... 1.2
-    var characterScale: Double {
-        get { characterScaleChoice ?? 0.7 }
-        set { characterScaleChoice = newValue }
+    var dockScaleChoice: Double?                    // on-screen logo size, 0.8 ... 1.6 (1 = 30pt)
+    var dockScale: Double {
+        get { dockScaleChoice ?? 1 }
+        set { dockScaleChoice = newValue }
+    }
+    var dockSpotChoice: String?                     // where the on-screen bar sits (a DockSpot; text so old places still load)
+    var dockSpot: DockSpot {
+        get { DockSpot.saved(dockSpotChoice) }
+        set { dockSpotChoice = newValue.rawValue }
     }
     var pollSeconds: Int = 60
     var meetingLeadMinutes: Int = 10

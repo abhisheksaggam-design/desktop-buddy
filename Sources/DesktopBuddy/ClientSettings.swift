@@ -274,6 +274,10 @@ struct TokenField: View {
                     .frame(minWidth: 180)
                     .frame(height: 24)
                     .onSubmit(add)
+                    // Typed but not added with Return: add it when the field loses focus, so nothing is lost.
+                    .onChange(of: focused) { _, f in
+                        if !f && !draft.trimmingCharacters(in: .whitespaces).isEmpty { add() }
+                    }
                     .onChange(of: draft) { _, v in if v.contains(",") { add() } }
                     .onKeyPress(.delete) {
                         guard draft.isEmpty, !tokens.isEmpty else { return .ignored }
