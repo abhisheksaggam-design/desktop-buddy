@@ -6,3 +6,8 @@ dist/
 .swiftpm/
 # Team sign-in setup: share privately, never commit
 team.json
+.tools/
+site/node_modules/
+site/.next/
+site/out/
+.claude/worktrees/

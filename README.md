@@ -13,6 +13,8 @@ A native macOS menu bar app that puts a quiet notification on your desktop when 
 
 ---
 
+> **Building, releasing or handing over the project?** See [SETUP.md](SETUP.md): every feature, the setup, the release process, pending tasks and the Windows plan.
+
 ## Contents
 
 1. [Download and install](#1-download-and-install)
@@ -320,6 +322,8 @@ xcrun stapler staple "dist/Desktop Buddy.dmg"
 | `…/Updates.swift` | Daily check for a newer GitHub release |
 | `…/SelfTest.swift` | Built-in scenario tests (`--selftest`) |
 | `Resources/` | App icon and bundled logos |
+| `dmg/` | The designed DMG install window (background generator and layout) |
+| `site/` | The website (Next.js) |
 | `docs/` | Screenshots |
 
 ### Publishing a new version

@@ -48,8 +48,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleExecutable</key><string>DesktopBuddyV2</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
-  <key>CFBundleShortVersionString</key><string>2.3</string>
-  <key>CFBundleVersion</key><string>7</string>
+  <key>CFBundleShortVersionString</key><string>2.4</string>
+  <key>CFBundleVersion</key><string>8</string>
   <key>NSHumanReadableCopyright</key><string>Desktop Buddy. Reads Google Workspace and Microsoft 365 on your Mac; no servers, no AI.</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><true/>
@@ -92,11 +92,23 @@ fi
 if [[ "${1:-}" == "--share" ]]; then
   rm -f "dist/Desktop Buddy.zip" "dist/Desktop Buddy.dmg"
   ditto -c -k --keepParent "$APP" "dist/Desktop Buddy.zip"
-  STAGE=$(mktemp -d)
-  cp -R "$APP" "$STAGE/"
-  ln -s /Applications "$STAGE/Applications"
-  hdiutil create -volname "Desktop Buddy" -srcfolder "$STAGE" -ov -format UDZO "dist/Desktop Buddy.dmg" >/dev/null
-  rm -rf "$STAGE"
+  # The designed install window (dmg/settings.py + dmg/background.tiff) needs dmgbuild; it's set up
+  # once in .tools/ (git-ignored). Without it, a plain DMG is made instead.
+  DMGBUILD=".tools/dmg-venv/bin/dmgbuild"
+  if [[ ! -x "$DMGBUILD" ]]; then
+    python3 -m venv .tools/dmg-venv >/dev/null 2>&1 && .tools/dmg-venv/bin/pip -q install dmgbuild >/dev/null 2>&1 || true
+  fi
+  if [[ -x "$DMGBUILD" ]]; then
+    "$DMGBUILD" -s dmg/settings.py -D app="$APP" "Desktop Buddy" "dist/Desktop Buddy.dmg" >/dev/null
+    echo "DMG: designed install window"
+  else
+    STAGE=$(mktemp -d)
+    cp -R "$APP" "$STAGE/"
+    ln -s /Applications "$STAGE/Applications"
+    hdiutil create -volname "Desktop Buddy" -srcfolder "$STAGE" -ov -format UDZO "dist/Desktop Buddy.dmg" >/dev/null
+    rm -rf "$STAGE"
+    echo "DMG: plain (couldn't set up dmgbuild)"
+  fi
   # Release assets: the in-app updater looks for these two names.
   cp "dist/Desktop Buddy.dmg" dist/Desktop-Buddy.dmg
   (cd dist && shasum -a 256 Desktop-Buddy.dmg > Desktop-Buddy.dmg.sha256)
