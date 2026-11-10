@@ -20,14 +20,26 @@ final class AppState: ObservableObject {
     static let shared = AppState()
 
     @Published var config: AppConfig { didSet { JSONFile.save(config, to: Paths.config) } }
-    @Published private(set) var items: [BuddyItem] = [] { didSet { JSONFile.save(items, to: Paths.inbox) } }
+    @Published private(set) var items: [BuddyItem] = [] {
+        didSet {
+            JSONFile.save(items, to: Paths.inbox)
+            ownerSlots = Self.slots(previous: ownerSlots, present: Set(items.map(\.owner)), defaultOrder: defaultOwnerOrder)
+        }
+    }
+    /// Left-to-right order of the logos on screen (see `slots`).
+    private var ownerSlots: [String] = []
     @Published var expanded = false
     @Published var filterOwner: String?             // nil = show every owner in the list
     @Published var lastArrival: BuddyItem?          // drives the speech bubble
+    /// What the last Done / Clear removed, for a few seconds, so it can be put back.
+    @Published private(set) var undo: UndoClear?
+    /// True after Tab/arrow keys and false again on mouse use, so rows only look selected while you use the keyboard.
+    @Published var usingKeyboard = false
     @Published var serviceStatus: [String: ServiceStatus] = [:]   // "<accountID>.<source>"
     @Published var signedIn: Set<String> = []                     // account IDs with a saved sign-in
     @Published var checking: Set<String> = []                     // account IDs being checked right now
     @Published private(set) var snoozed: [Snoozed] = [] { didSet { JSONFile.save(snoozed, to: Paths.snoozed) } }
+    @Published var screenshotsAllowedUntil: Date?                // "Allow Screenshots for 1 Minute"
     @Published var expired: Set<String> = []                      // account IDs whose sign-in the provider rejected
 
     /// accountID -> the address that actually signed in, when it isn't the account's email.
@@ -35,6 +47,9 @@ final class AppState: ObservableObject {
 
     /// True when the account can't be checked until you sign in (never, expired, or as someone else).
     func needsSignIn(_ id: String) -> Bool { !signedIn.contains(id) || expired.contains(id) || wrongAccount[id] != nil }
+
+    /// Muted mail IDs, so Gmail doesn't download them again every check. Cleared when mute rules change.
+    var mutedMail: Set<String> = []
 
     /// IDs already shown (or dismissed) so they never pop up twice.
     private var seen: [String] = [] { didSet { JSONFile.save(seen, to: Paths.seen) } }
@@ -124,7 +139,16 @@ final class AppState: ObservableObject {
 
     func update(_ a: AccountConfig) {
         guard let i = config.accounts.firstIndex(where: { $0.id == a.id }) else { return }
+        let old = config.accounts[i]
         config.accounts[i] = a
+        if old.mutedSenders != a.mutedSenders || old.mutedKeywords != a.mutedKeywords || old.onlyLabelsList != a.onlyLabelsList
+            || old.mutedChatsList != a.mutedChatsList {
+            // Rules changed: muted mail or chats may now be wanted (forget the cache), and newly muted mail leaves at once.
+            mutedMail = mutedMail.filter { !$0.hasPrefix("mail:\(a.id):") }
+            let before = items.count
+            items.removeAll { $0.accountID == a.id && MailFilter.isMuted($0, a) }
+            if items.count != before { tidyAfterRemoval() }
+        }
         // Turning a service off clears what it was showing.
         let watched: [(ItemSource, Bool)] = [(.mail, a.watchMail), (.chat, a.watchChat), (.meeting, a.watchMeetings), (.task, a.watchTasks)]
         let off = watched.filter { !$0.1 }.map(\.0)
@@ -156,7 +180,7 @@ final class AppState: ObservableObject {
         for item in fresh { markSeen(item.id) }
         items.insert(contentsOf: fresh.sorted { $0.date > $1.date }, at: 0)
         lastArrival = fresh.max { $0.date < $1.date }
-        if config.playSound { NSSound(named: "Glass")?.play() }
+        if config.playSound, let lead = Sounds.leadSource(of: fresh) { Sounds.play(config.sound(for: lead)) }
         return fresh.count
     }
 
@@ -186,7 +210,7 @@ final class AppState: ObservableObject {
     /// Self-test only: forget everything seen/snoozed so each scenario starts clean.
     func resetForTesting() {
         seen = []; seenSet = []; snoozed = []; items = []
-        expired = []; wrongAccount = [:]; serviceStatus = [:]
+        expired = []; wrongAccount = [:]; serviceStatus = [:]; mutedMail = []
     }
 
     /// Removes sample items left over from a `--demo` run.
@@ -203,8 +227,39 @@ final class AppState: ObservableObject {
     }
 
     func clearAll(owner: String? = nil) {
+        remember(items.filter { owner == nil || $0.owner == owner })
         if let owner { items.removeAll { $0.owner == owner } } else { items.removeAll() }
         tidyAfterRemoval()
+    }
+
+    /// Done on one or more notifications (from you, not from syncing): removed, with Undo for a few seconds.
+    func done(_ ids: [String]) {
+        let set = Set(ids)
+        remember(items.filter { set.contains($0.id) })
+        items.removeAll { set.contains($0.id) }
+        tidyAfterRemoval()
+    }
+    func done(_ id: String) { done([id]) }
+
+    static let undoSeconds: TimeInterval = 6
+
+    private func remember(_ removed: [BuddyItem]) {
+        guard !removed.isEmpty else { return }
+        let u = UndoClear(items: removed)
+        undo = u
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.undoSeconds) { [weak self] in
+            guard let self, self.undo?.id == u.id else { return }
+            self.undo = nil
+            if self.items.isEmpty { self.expanded = false }
+        }
+    }
+
+    /// Puts back what the last Done / Clear removed (skipping anything that has come back on its own).
+    func undoLast() {
+        guard let u = undo else { return }
+        undo = nil
+        let present = Set(items.map(\.id))
+        items = (items + u.items.filter { !present.contains($0.id) }).sorted { $0.date > $1.date }
     }
 
     func open(_ item: BuddyItem) {
@@ -244,9 +299,18 @@ final class AppState: ObservableObject {
 
     /// Owners that currently have something to show, in a stable left-to-right order.
     var activeOwners: [String] {
-        let order = config.clients.map(\.id) + config.accounts.map(\.id) + [reminderOwner]
         let present = Set(items.map(\.owner))
-        return order.filter(present.contains)
+        return Self.slots(previous: ownerSlots, present: present, defaultOrder: defaultOwnerOrder)
+    }
+
+    private var defaultOwnerOrder: [String] { config.clients.map(\.id) + config.accounts.map(\.id) + [reminderOwner] }
+
+    /// Logos keep their place: the logos sit in the bottom-right corner, so a newcomer joins on the
+    /// left (where there's room) instead of pushing the others aside. Owners that leave just drop out.
+    nonisolated static func slots(previous: [String], present: Set<String>, defaultOrder: [String]) -> [String] {
+        let kept = previous.filter(present.contains)
+        let newcomers = defaultOrder.filter { present.contains($0) && !kept.contains($0) }
+        return newcomers + kept
     }
 
     func ownerName(_ owner: String) -> String {
@@ -287,7 +351,13 @@ final class AppState: ObservableObject {
         if let last = lastArrival, !items.contains(where: { $0.id == last.id }) {
             lastArrival = nil
         }
-        if items.isEmpty { expanded = false }
+        if items.isEmpty && undo == nil { expanded = false }      // stays open briefly so Undo is reachable
         if let f = filterOwner, !items.contains(where: { $0.owner == f }) { filterOwner = nil }
     }
+}
+
+struct UndoClear: Equatable {
+    let id = UUID()
+    let items: [BuddyItem]
+    var label: String { items.count == 1 ? "1 removed" : "\(items.count) removed" }
 }

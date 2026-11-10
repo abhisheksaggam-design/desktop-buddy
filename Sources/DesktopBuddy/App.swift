@@ -13,6 +13,8 @@ enum Main {
             Task { @MainActor in exit(await SelfTest.run()) }
             dispatchMain()
         }
+        // A throwaway data folder (testing) never reads or writes your real sign-ins.
+        if ProcessInfo.processInfo.environment["DESKTOPBUDDY_HOME"] != nil { Keychain.disabled = true }
         let app = NSApplication.shared
         let delegate = AppDelegate()
         app.delegate = delegate
@@ -25,7 +27,7 @@ enum Main {
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var statusItem: NSStatusItem!
     private let popover = NSPopover()
-    private var settingsWindow: NSWindow?
+    private(set) var settingsWindow: NSWindow?
     private var bag = Set<AnyCancellable>()
 
     func applicationDidFinishLaunching(_ note: Notification) {
@@ -38,10 +40,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         popover.behavior = .transient
         popover.animates = true
-        popover.contentViewController = NSHostingController(rootView: MenuBarPopover(openSettings: { [weak self] in
-            self?.popover.performClose(nil)
-            self?.openSettings()
-        }))
+        popover.contentViewController = NSHostingController(rootView: MenuBarPopover(
+            openSettings: { [weak self] in
+                self?.popover.performClose(nil)
+                self?.openSettings()
+            },
+            showTour: { [weak self] in
+                self?.popover.performClose(nil)
+                self?.showTour()
+            },
+            checkForUpdates: { [weak self] in
+                self?.popover.performClose(nil)
+                self?.checkForUpdates()
+            },
+            reportBug: { [weak self] in
+                self?.popover.performClose(nil)
+                self?.reportBug()
+            }))
+        TourController.shared.onClose = { [weak self] addAccount in
+            if addAccount || AppState.shared.config.accounts.isEmpty {
+                self?.openSettings()
+                if addAccount { SettingsRouter.shared.showingProviderPicker = true }
+            } else if self?.settingsWindow?.isVisible != true {
+                NSApp.setActivationPolicy(.accessory)
+            }
+        }
 
         AppState.shared.$items
             .combineLatest(AppState.shared.$config.map(\.paused).removeDuplicates())
@@ -49,18 +72,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             .sink { [weak self] items, paused in self?.updateIcon(count: items.count, paused: paused) }
             .store(in: &bag)
 
-        _ = OverlayController.shared
-        OverlayController.shared.update()
+        // New notifications drop down at the top centre of the screen.
+        GlimpseController.shared.viewMore = { [weak self] in self?.showList() }
+        DockController.shared.update()
         Poller.shared.start()
         UpdateChecker.shared.start()
 
+        // Test hook: check the feed (DESKTOPBUDDY_UPDATE_FEED) and install straight away.
+        if CommandLine.arguments.contains("--install-update") {
+            Task { @MainActor in
+                await UpdateChecker.shared.check()
+                await UpdateChecker.shared.installAndRestart()
+                print("Update result: \(UpdateChecker.shared.phase)")
+            }
+        }
+        // Test hook (only with a throwaway data folder): another process can post
+        // "DesktopBuddy.test.send" to deliver sample notifications, to watch the animation.
+        if ProcessInfo.processInfo.environment["DESKTOPBUDDY_HOME"] != nil {
+            DistributedNotificationCenter.default().addObserver(forName: Notification.Name("DesktopBuddy.test.status"),
+                                                                object: nil, queue: .main) { _ in
+                MainActor.assumeIsolated { GlimpseController.shared.printStatus(); DockController.shared.printStatus() }
+            }
+            DistributedNotificationCenter.default().addObserver(forName: Notification.Name("DesktopBuddy.test.send"),
+                                                                object: nil, queue: .main) { note in
+                let owner = note.object as? String
+                MainActor.assumeIsolated {
+                    let state = AppState.shared
+                    let account = state.config.accounts.first { $0.id == owner } ?? state.config.accounts.first
+                    let client = state.config.clients.first { $0.id == owner }?.id
+                    state.offer([BuddyItem(id: "test:\(UUID().uuidString)", source: .chat, accountID: account?.id ?? "x",
+                                           title: "Project Apollo", from: "Priya Shah",
+                                           detail: "Can you review the new pricing page before the 3pm call?",
+                                           date: Date(), url: nil, clientID: client)])
+                }
+            }
+        }
         if CommandLine.arguments.contains("--demo") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { Self.sendTestItems() }
+            // Test hook: report the pop-up while it's open and after it should have gone.
+            if ProcessInfo.processInfo.environment["DESKTOPBUDDY_HOME"] != nil {
+                for t in [1.1, 1.8, 6.0, 11.5, 12.5] {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + t) { print("t=\(t)", terminator: " "); GlimpseController.shared.printStatus(); DockController.shared.printStatus() }
+                }
+            }
             return
         }
         AppState.shared.purgeDemoItems()
-        // First launch: open Settings on the empty Accounts state.
-        if AppState.shared.config.accounts.isEmpty {
+        // First launch: the welcome tour, which ends in Settings to add an account.
+        if TourController.shouldShowOnLaunch(AppState.shared.config) {
+            showTour()
+        } else if AppState.shared.config.accounts.isEmpty {
             SettingsRouter.shared.selection = nil
             openSettings()
         }
@@ -68,11 +129,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func updateIcon(count: Int, paused: Bool) {
         guard let button = statusItem.button else { return }
-        let name = paused ? "bell.slash" : (count > 0 ? "bell.badge" : "bell")
-        let img = NSImage(systemSymbolName: name, accessibilityDescription: "Desktop Buddy")
-        img?.isTemplate = true
-        button.image = img
-        button.title = count > 0 && !paused ? " \(count)" : ""
+        button.image = MenuBarMark.image(paused: paused)
+        let title = MenuBarMark.title(count: count, paused: paused)
+        button.attributedTitle = NSAttributedString(string: title.isEmpty ? "" : " " + title, attributes: [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .semibold),
+            .baselineOffset: 0.5,
+        ])
         button.imagePosition = .imageLeading
         button.setAccessibilityLabel(paused ? "Desktop Buddy, paused" : "Desktop Buddy, \(count) waiting")
     }
@@ -84,6 +146,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                          action: #selector(togglePause), keyEquivalent: "").target = self
             menu.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: ",").target = self
             menu.addItem(withTitle: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "").target = self
+            menu.addItem(withTitle: "Show Tour", action: #selector(showTour), keyEquivalent: "").target = self
+            if FeedbackSender.isSetUp {
+                menu.addItem(withTitle: "Report a Bug or Idea…", action: #selector(reportBug), keyEquivalent: "").target = self
+            }
+            if AppState.shared.config.hidesFromSharing {
+                menu.addItem(withTitle: "Allow Screenshots for 1 Minute", action: #selector(allowScreenshots), keyEquivalent: "").target = self
+            }
             menu.addItem(.separator())
             menu.addItem(withTitle: "Quit Desktop Buddy", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
             statusItem.menu = menu
@@ -99,7 +168,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
+    /// Opens the menu bar list (from the pop-up's "View more").
+    func showList() {
+        guard let button = statusItem.button, !popover.isShown else { return }
+        NSApp.activate()
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        popover.contentViewController?.view.window?.makeKey()
+    }
+
+    @objc func reportBug() { FeedbackController.shared.show() }
+
     @objc private func togglePause() { AppState.shared.config.paused.toggle() }
+
+    @objc func allowScreenshots() { DockController.shared.allowScreenshots() }
+
+    /// Welcome tour window.
+    @objc func showTour() {
+        TourController.shared.show()
+    }
 
     /// Checks now and says what it found: a new version (Download / Later), up to date, or offline.
     @objc func checkForUpdates() {
@@ -109,8 +195,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             let alert = NSAlert()
             if let r = updates.available {
                 alert.messageText = "Desktop Buddy \(r.version) Is Available"
-                alert.informativeText = "You have \(updates.currentVersion). Download it, open it and drag Desktop Buddy into Applications. Your accounts and settings stay as they are."
-                alert.addButton(withTitle: "Download")
+                alert.informativeText = updates.canInstallInPlace
+                    ? "You have \(updates.currentVersion). Desktop Buddy downloads it, checks it and restarts. Your accounts and settings stay as they are."
+                    : "You have \(updates.currentVersion). Download it, open it and drag Desktop Buddy into Applications. Your accounts and settings stay as they are."
+                alert.addButton(withTitle: updates.canInstallInPlace ? "Update and Restart" : "Download")
                 alert.addButton(withTitle: "Later")
             } else if let e = updates.lastError {
                 alert.messageText = "Couldn't Check for Updates"
@@ -122,11 +210,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 alert.addButton(withTitle: "OK")
             }
             NSApp.activate(ignoringOtherApps: true)
-            if alert.runModal() == .alertFirstButtonReturn, updates.available != nil { updates.download() }
+            guard alert.runModal() == .alertFirstButtonReturn, updates.available != nil else { return }
+            if updates.canInstallInPlace {
+                await updates.installAndRestart()
+                if case .failed(let message) = updates.phase {
+                    let fail = NSAlert()
+                    fail.messageText = "Couldn't Update"
+                    fail.informativeText = message
+                    fail.addButton(withTitle: "Download Manually")
+                    fail.addButton(withTitle: "Cancel")
+                    if fail.runModal() == .alertFirstButtonReturn { updates.download() }
+                }
+            } else {
+                updates.download()
+            }
         }
     }
 
     @objc func openSettings() {
+        if NSEvent.modifierFlags.contains(.option) { SettingsRouter.shared.adminRequested = true }
         if settingsWindow == nil {
             let w = Self.makeSettingsWindow()
             w.minSize = NSSize(width: 760, height: 540)
@@ -160,6 +262,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         guard (notification.object as? NSWindow) === settingsWindow else { return }
+        SettingsRouter.shared.adminRequested = false
+        if SettingsRouter.shared.selection == .team { SettingsRouter.shared.selection = .general }
         NSApp.setActivationPolicy(.accessory)
     }
 
@@ -181,6 +285,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let app = NSMenu()
         app.addItem(withTitle: "About Desktop Buddy", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         app.addItem(withTitle: "Check for Updates…", action: #selector(AppDelegate.checkForUpdates), keyEquivalent: "").target = target
+        if FeedbackSender.isSetUp {
+            app.addItem(withTitle: "Report a Bug or Idea…", action: #selector(AppDelegate.reportBug), keyEquivalent: "").target = target
+        }
         app.addItem(.separator())
         app.addItem(withTitle: "Settings…", action: #selector(AppDelegate.openSettings), keyEquivalent: ",").target = target
         app.addItem(.separator())

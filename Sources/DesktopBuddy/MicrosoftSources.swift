@@ -25,16 +25,13 @@ private func stripHTML(_ s: String) -> String {
 enum OutlookMailSource {
     static func fetch(_ api: APIClient) async throws -> FetchResult {
         let acc = api.account
-        let since = isoPlain.string(from: Date().addingTimeInterval(-2 * 86_400))
-        let json = try await api.get("\(graph)/me/mailFolders/inbox/messages", [
-            "$filter": "receivedDateTime ge \(since) and isRead eq false",
-            "$orderby": "receivedDateTime desc",
-            "$select": "id,subject,from,bodyPreview,receivedDateTime,webLink",
-            "$top": "25",
-        ])
+        var messages: [[String: Any]] = []
+        for (path, query) in listQueries(acc, since: Date().addingTimeInterval(-2 * 86_400)) {
+            messages += try await api.get(path, query)["value"] as? [[String: Any]] ?? []
+        }
         var items: [BuddyItem] = []
-        for m in json["value"] as? [[String: Any]] ?? [] {
-            guard let id = m["id"] as? String else { continue }
+        for m in messages {
+            guard let id = m["id"] as? String, !items.contains(where: { $0.id == "mail:\(acc.id):\(id)" }) else { continue }
             let from = ((m["from"] as? [String: Any])?["emailAddress"] as? [String: Any])
             let name = (from?["name"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? from?["address"] as? String
             items.append(BuddyItem(
@@ -45,7 +42,32 @@ enum OutlookMailSource {
                 url: (m["webLink"] as? String).flatMap(URL.init(string:)),
                 fromAddress: (from?["address"] as? String)?.lowercased()))
         }
+        items.sort { $0.date > $1.date }
         return FetchResult(source: .mail, items: items, liveIDs: Set(items.map(\.id)))
+    }
+
+    /// Unread inbox mail; or, with "only these categories", unread mail with each category in any folder.
+    static func listQueries(_ acc: AccountConfig, since: Date) -> [(String, [String: String])] {
+        let base = "receivedDateTime ge \(isoPlain.string(from: since)) and isRead eq false"
+        let select = "id,subject,from,bodyPreview,receivedDateTime,webLink"
+        guard acc.labelsOnly else {
+            return [("\(graph)/me/mailFolders/inbox/messages",
+                     ["$filter": base, "$orderby": "receivedDateTime desc", "$select": select, "$top": "25"])]
+        }
+        // Graph can't sort a category filter, so results are sorted after merging.
+        return acc.onlyLabels.map { c in
+            let name = c.name.replacingOccurrences(of: "'", with: "''")
+            return ("\(graph)/me/messages",
+                    ["$filter": "\(base) and categories/any(c:c eq '\(name)')", "$select": select, "$top": "25"])
+        }
+    }
+
+    /// Categories used on your recent mail. (The full category list needs a permission Desktop Buddy doesn't ask for.)
+    static func categories(_ api: APIClient) async throws -> [MailLabel] {
+        let json = try await api.get("\(graph)/me/messages", ["$select": "categories", "$top": "200",
+                                                               "$orderby": "receivedDateTime desc"])
+        let names = Set((json["value"] as? [[String: Any]] ?? []).flatMap { $0["categories"] as? [String] ?? [] })
+        return names.sorted { $0.localizedStandardCompare($1) == .orderedAscending }.map { MailLabel(id: $0, name: $0) }
     }
 }
 

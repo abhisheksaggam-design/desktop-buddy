@@ -118,6 +118,32 @@ struct AccountConfig: Identifiable, Codable, Equatable {
     var redirectPort: Int = 8766
     var tenant: String?                        // Microsoft: "organizations", "common" or a tenant ID
 
+    // Mail filters (optional so older settings files still load).
+    var mutedSendersList: [String]?            // "news.example.com" or "noreply@x.com": never notify
+    var mutedKeywordsList: [String]?           // whole words in mail or chats (subject, name, message, sender): never notify
+    var onlyLabelsList: [MailLabel]?           // set = only mail with one of these labels, from any folder
+    // Chat filters.
+    var mutedChatsList: [ChatRef]?             // these spaces / chats never notify
+
+    var mutedSenders: [String] {
+        get { mutedSendersList ?? [] }
+        set { mutedSendersList = newValue.isEmpty ? nil : newValue }
+    }
+    var mutedKeywords: [String] {
+        get { mutedKeywordsList ?? [] }
+        set { mutedKeywordsList = newValue.isEmpty ? nil : newValue }
+    }
+    var mutedChats: [ChatRef] {
+        get { mutedChatsList ?? [] }
+        set { mutedChatsList = newValue.isEmpty ? nil : newValue }
+    }
+    var onlyLabels: [MailLabel] {
+        get { onlyLabelsList ?? [] }
+        set { onlyLabelsList = newValue }
+    }
+    /// "Only mail with these labels" is chosen (even before any label is picked).
+    var labelsOnly: Bool { onlyLabelsList != nil }
+
     var provider: Provider {
         get { providerChoice ?? .google }
         set { providerChoice = newValue }
@@ -126,6 +152,12 @@ struct AccountConfig: Identifiable, Codable, Equatable {
         get { tintChoice ?? (provider == .microsoft ? .purple : .blue) }
         set { tintChoice = newValue }
     }
+}
+
+/// A Gmail label (id is Google's label ID) or an Outlook category (id is its name).
+struct MailLabel: Codable, Hashable, Identifiable {
+    var id: String
+    var name: String
 }
 
 // MARK: - Clients
@@ -191,17 +223,35 @@ struct AppConfig: Codable, Equatable {
     }
     var reminderLogoPath: String?
     var seededClients: Bool?
-    var characterScaleChoice: Double?               // on-screen logo size, 0.5 ... 1.2
-    var characterScale: Double {
-        get { characterScaleChoice ?? 0.7 }
-        set { characterScaleChoice = newValue }
+    var dockScaleChoice: Double?                    // on-screen logo size, 0.8 ... 1.6 (1 = 30pt)
+    var dockScale: Double {
+        get { dockScaleChoice ?? 1 }
+        set { dockScaleChoice = newValue }
+    }
+    var dockSpotChoice: String?                     // where the on-screen bar sits (a DockSpot; text so old places still load)
+    var dockSpot: DockSpot {
+        get { DockSpot.saved(dockSpotChoice) }
+        set { dockSpotChoice = newValue.rawValue }
     }
     var pollSeconds: Int = 60
     var meetingLeadMinutes: Int = 10
     var quietStartHour: Int?        // e.g. 22
     var quietEndHour: Int?          // e.g. 8
     var playSound = true
+    var soundChoices: [String: String]?             // ItemSource raw value -> sound name, or "None"
+    func sound(for source: ItemSource) -> String { soundChoices?[source.rawValue] ?? defaultSound }
+    mutating func setSound(_ name: String, for source: ItemSource) {
+        var x = soundChoices ?? [:]
+        x[source.rawValue] = name
+        soundChoices = x
+    }
     var paused = false
+    var shareProtection: Bool?                      // nil = on: keep the logos out of screen sharing (and screenshots)
+    var hidesFromSharing: Bool {
+        get { shareProtection ?? true }
+        set { shareProtection = newValue }
+    }
+    var tourSeen: Bool?                             // the welcome tour was finished or skipped
     var autoUpdateCheck: Bool?                      // nil = on
     var checkForUpdates: Bool {
         get { autoUpdateCheck ?? true }

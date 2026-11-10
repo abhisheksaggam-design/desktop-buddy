@@ -10,13 +10,17 @@ import Foundation
 ///   "googleClientID": "…apps.googleusercontent.com",
 ///   "googleClientSecret": "GOCSPX-…",        // only for Desktop-type clients; leave out for an iOS-type client
 ///   "microsoftClientID": "00000000-0000-…",  // Entra app, "Mobile and desktop" platform, public client
-///   "microsoftTenant": "organizations"        // or "common" / a specific tenant ID
+///   "microsoftTenant": "organizations",       // or "common" / a specific tenant ID
+///   "feedbackFormID": "…",                    // Formspree form ID (formspree.io/f/<ID>): "Report a Bug" emails the team
+///   "feedbackEmail": "team@example.com"       // where reports go by email if the service can't be used
 /// }
 struct TeamConfig: Codable {
     var googleClientID: String?
     var googleClientSecret: String?
     var microsoftClientID: String?
     var microsoftTenant: String?
+    var feedbackFormID: String?
+    var feedbackEmail: String?
 
     static var current: TeamConfig {
         let local = Paths.supportDir.appendingPathComponent("team.json")
